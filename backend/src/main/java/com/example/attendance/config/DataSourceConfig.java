@@ -10,13 +10,14 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.util.StringUtils;
 
 import javax.sql.DataSource;
-import java.net.URI;
-import java.net.URISyntaxException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Configuration
 public class DataSourceConfig {
 
     private static final Logger log = LoggerFactory.getLogger(DataSourceConfig.class);
+    private static final Pattern USERINFO_PATTERN = Pattern.compile("^(?:jdbc:)?postgres(?:ql)?://([^:]+):([^@]+)@([^/]+)(/.*)?$");
 
     @Bean
     @Primary
@@ -30,45 +31,34 @@ public class DataSourceConfig {
         }
 
         HikariDataSource dataSource = new HikariDataSource();
+        dataSource.setDriverClassName("org.postgresql.Driver");
 
         if (StringUtils.hasText(rawUrl)) {
-            if (rawUrl.startsWith("postgres://") || rawUrl.startsWith("postgresql://")) {
-                try {
-                    URI uri = new URI(rawUrl.replace("postgres://", "http://").replace("postgresql://", "http://"));
-                    String host = uri.getHost();
-                    int port = uri.getPort() == -1 ? 5432 : uri.getPort();
-                    String path = uri.getPath();
-                    String query = uri.getQuery();
+            Matcher matcher = USERINFO_PATTERN.matcher(rawUrl);
+            if (matcher.matches()) {
+                String user = matcher.group(1);
+                String pass = matcher.group(2);
+                String host = matcher.group(3);
+                String path = matcher.group(4) != null ? matcher.group(4) : "";
 
-                    String jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path;
-                    if (StringUtils.hasText(query)) {
-                        jdbcUrl += "?" + query;
-                    }
-
-                    dataSource.setJdbcUrl(jdbcUrl);
-
-                    if (uri.getUserInfo() != null) {
-                        String[] parts = uri.getUserInfo().split(":", 2);
-                        dataSource.setUsername(parts[0]);
-                        if (parts.length > 1) {
-                            dataSource.setPassword(parts[1]);
-                        }
-                    }
-                    log.info("Configured HikariDataSource from Cloud DATABASE_URL for host: {}", host);
-                    return dataSource;
-                } catch (URISyntaxException e) {
-                    log.warn("Failed to parse URI DATABASE_URL, fallback to standard properties", e);
-                }
-            } else if (rawUrl.startsWith("jdbc:")) {
-                dataSource.setJdbcUrl(rawUrl);
-                dataSource.setUsername(properties.getUsername());
-                dataSource.setPassword(properties.getPassword());
-                log.info("Configured HikariDataSource from standard JDBC URL");
+                String jdbcUrl = "jdbc:postgresql://" + host + path;
+                dataSource.setJdbcUrl(jdbcUrl);
+                dataSource.setUsername(user);
+                dataSource.setPassword(pass);
+                log.info("Configured HikariDataSource from credentials URL for host: {}", host);
                 return dataSource;
             }
+
+            // Standard JDBC URL without embedded credentials
+            String jdbcUrl = rawUrl.startsWith("jdbc:") ? rawUrl : "jdbc:" + rawUrl;
+            dataSource.setJdbcUrl(jdbcUrl);
+            dataSource.setUsername(StringUtils.hasText(properties.getUsername()) ? properties.getUsername() : System.getenv("SPRING_DATASOURCE_USERNAME"));
+            dataSource.setPassword(StringUtils.hasText(properties.getPassword()) ? properties.getPassword() : System.getenv("SPRING_DATASOURCE_PASSWORD"));
+            log.info("Configured HikariDataSource from standard JDBC URL");
+            return dataSource;
         }
 
-        log.warn("DATABASE_URL is not set or defaulted to local. Connecting using properties: {}", properties.getUrl());
+        log.warn("Using default DataSourceProperties: {}", properties.getUrl());
         dataSource.setJdbcUrl(properties.getUrl());
         dataSource.setUsername(properties.getUsername());
         dataSource.setPassword(properties.getPassword());
