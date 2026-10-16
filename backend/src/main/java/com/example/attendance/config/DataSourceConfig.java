@@ -21,43 +21,57 @@ public class DataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource(DataSourceProperties properties) {
-        String rawUrl = System.getenv("DATABASE_URL");
+        String rawUrl = System.getenv("SPRING_DATASOURCE_URL");
+        if (!StringUtils.hasText(rawUrl)) {
+            rawUrl = System.getenv("DATABASE_URL");
+        }
         if (!StringUtils.hasText(rawUrl)) {
             rawUrl = properties.getUrl();
         }
 
-        HikariDataSource dataSource = properties.initializeDataSourceBuilder().type(HikariDataSource.class).build();
+        HikariDataSource dataSource = new HikariDataSource();
 
-        if (StringUtils.hasText(rawUrl) && (rawUrl.startsWith("postgres://") || rawUrl.startsWith("postgresql://"))) {
-            try {
-                // Parse standard URI postgresql://user:pass@host:port/dbname?query
-                URI uri = new URI(rawUrl.replace("postgres://", "http://").replace("postgresql://", "http://"));
-                String host = uri.getHost();
-                int port = uri.getPort() == -1 ? 5432 : uri.getPort();
-                String path = uri.getPath();
-                String query = uri.getQuery();
+        if (StringUtils.hasText(rawUrl)) {
+            if (rawUrl.startsWith("postgres://") || rawUrl.startsWith("postgresql://")) {
+                try {
+                    URI uri = new URI(rawUrl.replace("postgres://", "http://").replace("postgresql://", "http://"));
+                    String host = uri.getHost();
+                    int port = uri.getPort() == -1 ? 5432 : uri.getPort();
+                    String path = uri.getPath();
+                    String query = uri.getQuery();
 
-                String jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path;
-                if (StringUtils.hasText(query)) {
-                    jdbcUrl += "?" + query;
-                }
-
-                dataSource.setJdbcUrl(jdbcUrl);
-
-                if (uri.getUserInfo() != null) {
-                    String[] parts = uri.getUserInfo().split(":", 2);
-                    dataSource.setUsername(parts[0]);
-                    if (parts.length > 1) {
-                        dataSource.setPassword(parts[1]);
+                    String jdbcUrl = "jdbc:postgresql://" + host + ":" + port + path;
+                    if (StringUtils.hasText(query)) {
+                        jdbcUrl += "?" + query;
                     }
+
+                    dataSource.setJdbcUrl(jdbcUrl);
+
+                    if (uri.getUserInfo() != null) {
+                        String[] parts = uri.getUserInfo().split(":", 2);
+                        dataSource.setUsername(parts[0]);
+                        if (parts.length > 1) {
+                            dataSource.setPassword(parts[1]);
+                        }
+                    }
+                    log.info("Configured HikariDataSource from Cloud DATABASE_URL for host: {}", host);
+                    return dataSource;
+                } catch (URISyntaxException e) {
+                    log.warn("Failed to parse URI DATABASE_URL, fallback to standard properties", e);
                 }
-                log.info("Successfully configured PostgreSQL DataSource from DATABASE_URL for host: {}", host);
+            } else if (rawUrl.startsWith("jdbc:")) {
+                dataSource.setJdbcUrl(rawUrl);
+                dataSource.setUsername(properties.getUsername());
+                dataSource.setPassword(properties.getPassword());
+                log.info("Configured HikariDataSource from standard JDBC URL");
                 return dataSource;
-            } catch (URISyntaxException e) {
-                log.warn("Failed to parse DATABASE_URL URI, falling back to standard config", e);
             }
         }
 
+        log.warn("DATABASE_URL is not set or defaulted to local. Connecting using properties: {}", properties.getUrl());
+        dataSource.setJdbcUrl(properties.getUrl());
+        dataSource.setUsername(properties.getUsername());
+        dataSource.setPassword(properties.getPassword());
         return dataSource;
     }
 }
