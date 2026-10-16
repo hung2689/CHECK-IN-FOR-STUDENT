@@ -80,8 +80,14 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
         for (String origin : allowedOrigins.split(",")) {
-            config.addAllowedOrigin(origin.trim());
+            String o = origin.trim();
+            if (o.contains("*")) {
+                config.addAllowedOriginPattern(o);
+            } else {
+                config.addAllowedOrigin(o);
+            }
         }
+        config.addAllowedOriginPattern("https://*.vercel.app");
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

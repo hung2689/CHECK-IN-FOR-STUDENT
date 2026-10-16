@@ -31,7 +31,12 @@ spring:
       max-request-size: 10MB
 
 server:
-  port: 8080
+  port: ${PORT:8080}
+  servlet:
+    session:
+      cookie:
+        same-site: ${SESSION_COOKIE_SAME_SITE:lax}
+        secure: ${SESSION_COOKIE_SECURE:false}
   error:
     include-message: never
     include-stacktrace: never
