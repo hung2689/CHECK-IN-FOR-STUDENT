@@ -1,0 +1,22 @@
+# Node / Frontend
+**/node_modules/
+**/dist/
+frontend/.env.local
+frontend/.env.*.local
+
+# Java / Maven / Backend
+**/target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
