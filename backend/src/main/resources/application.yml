@@ -3,9 +3,9 @@ spring:
     name: attendance-system
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/attendance?options=-c%20timezone=Asia/Ho_Chi_Minh
-    username: postgres
-    password: postgres
+    url: ${SPRING_DATASOURCE_URL:${DATABASE_URL:jdbc:postgresql://localhost:5432/attendance?options=-c%20timezone=Asia/Ho_Chi_Minh}}
+    username: ${SPRING_DATASOURCE_USERNAME:${DB_USERNAME:postgres}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD:postgres}}
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
