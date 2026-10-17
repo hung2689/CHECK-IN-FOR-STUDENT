@@ -487,13 +487,12 @@ export const PublicAttendancePage: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                setShowDeniedModal(false);
-                requestGps(true);
+                window.location.reload();
               }}
               className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-2"
             >
               <RotateCcw className="w-4 h-4" />
-              <span>Thử lại / Chia sẻ vị trí</span>
+              <span>Tải lại trang</span>
             </button>
           </div>
         </div>
