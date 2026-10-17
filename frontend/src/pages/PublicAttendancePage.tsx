@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import api from '../services/api';
 import { PublicTokenInfo, PublicAttendanceResponse } from '../types';
@@ -13,6 +13,12 @@ import {
   Send,
   MapPin,
   Compass,
+  RotateCcw,
+  AlertTriangle,
+  Lock,
+  Smartphone,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 export const PublicAttendancePage: React.FC = () => {
@@ -29,6 +35,9 @@ export const PublicAttendancePage: React.FC = () => {
   const [coords, setCoords] = useState<{ latitude: number; longitude: number; accuracy: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'acquiring' | 'ready' | 'denied' | 'unavailable'>('acquiring');
   const [gpsReason, setGpsReason] = useState<string | null>(null);
+  const [showGpsGuide, setShowGpsGuide] = useState(true);
+
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Load saved studentCode from localStorage
   useEffect(() => {
@@ -36,7 +45,14 @@ export const PublicAttendancePage: React.FC = () => {
     if (saved) setStudentCode(saved);
   }, []);
 
-  // Request GPS position early
+  // Auto focus input when location becomes ready
+  useEffect(() => {
+    if (gpsStatus === 'ready') {
+      inputRef.current?.focus();
+    }
+  }, [gpsStatus]);
+
+  // Request GPS position
   const requestGps = () => {
     if (!navigator.geolocation) {
       setGpsStatus('unavailable');
@@ -66,8 +82,8 @@ export const PublicAttendancePage: React.FC = () => {
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 15000,
+        timeout: 12000,
+        maximumAge: 0,
       }
     );
   };
@@ -271,32 +287,104 @@ export const PublicAttendancePage: React.FC = () => {
               <p className="text-xs text-slate-400">{tokenInfo.sessionName}</p>
             </div>
 
-            {/* GPS Location Status Indicator */}
-            <div className="mb-5 p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <MapPin className={`w-4 h-4 ${gpsStatus === 'ready' ? 'text-emerald-400' : gpsStatus === 'denied' ? 'text-red-400' : 'text-amber-400'}`} />
-                <span className="text-slate-300 font-medium">Vị trí GPS:</span>
+            {/* GPS Location Status Indicator & Actions */}
+            {gpsStatus === 'ready' && coords ? (
+              <div className="mb-5 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs animate-fade-in">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                    <CheckCircle2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-emerald-400 font-bold block">Đã chia sẻ vị trí GPS</span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      Độ chính xác: ±{Math.round(coords.accuracy)} mét
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={requestGps}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-slate-300 hover:text-white glass-card flex items-center gap-1 cursor-pointer transition-colors"
+                  title="Cập nhật lại tọa độ"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Làm mới</span>
+                </button>
               </div>
-              <div>
-                {gpsStatus === 'ready' && coords && (
-                  <span className="text-emerald-400 font-mono">
-                    Đã nhận (±{Math.round(coords.accuracy)}m)
-                  </span>
-                )}
-                {gpsStatus === 'acquiring' && (
-                  <span className="text-amber-400 flex items-center gap-1">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    Đang dò vị trí...
-                  </span>
-                )}
-                {gpsStatus === 'denied' && (
-                  <span className="text-red-400 font-medium">Chưa cấp quyền GPS</span>
-                )}
-                {gpsStatus === 'unavailable' && (
-                  <span className="text-slate-400 font-medium">Không khả dụng</span>
-                )}
+            ) : gpsStatus === 'acquiring' ? (
+              <div className="mb-5 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs animate-fade-in">
+                <div className="flex items-center gap-2.5 mb-1.5 text-amber-300">
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                  <span className="font-bold">Đang yêu cầu truy cập vị trí GPS...</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Vui lòng nhấn <strong className="text-white">"Cho phép"</strong> trên cửa sổ hỏi quyền của trình duyệt để mở khóa nhập MSSV.
+                </p>
               </div>
-            </div>
+            ) : (
+              /* Denied or Unavailable */
+              <div className="mb-5 p-4 rounded-2xl bg-red-950/40 border border-red-500/40 text-xs shadow-lg shadow-red-950/30 animate-fade-in">
+                <div className="flex items-start gap-2.5 mb-2.5 text-red-400">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-400" />
+                  <div>
+                    <h4 className="font-extrabold text-white text-xs uppercase tracking-wide">
+                      Bắt buộc chia sẻ vị trí để điểm danh
+                    </h4>
+                    <p className="text-[11px] text-red-300/90 mt-0.5 leading-relaxed">
+                      Bạn chưa cấp quyền vị trí GPS. Để chống điểm danh gian lận, hệ thống <strong className="text-white underline">chặn nhập MSSV</strong> cho đến khi bạn chia sẻ vị trí tại lớp học.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Nút bấm chia sẻ lại vị trí */}
+                <button
+                  type="button"
+                  onClick={requestGps}
+                  className="w-full py-2.5 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 shadow-md shadow-red-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all mt-1"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Chia sẻ lại vị trí GPS</span>
+                </button>
+
+                {/* Hướng dẫn chi tiết cho iPhone & Android khi lỡ nhấn Từ chối */}
+                <div className="mt-3 pt-3 border-t border-red-500/20">
+                  <button
+                    type="button"
+                    onClick={() => setShowGpsGuide(!showGpsGuide)}
+                    className="w-full flex items-center justify-between text-[11px] font-semibold text-amber-300 hover:text-amber-200 cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5" />
+                      <span>Hướng dẫn nếu lỡ nhấn "Từ chối" trên điện thoại</span>
+                    </span>
+                    {showGpsGuide ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+
+                  {showGpsGuide && (
+                    <div className="mt-2.5 space-y-2 text-[11px] text-slate-300 animate-fade-in">
+                      <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                        <p className="font-bold text-indigo-300 flex items-center gap-1">
+                          📱 Dành cho iPhone (Safari):
+                        </p>
+                        <p className="text-slate-400">1. Nhấn vào biểu tượng <span className="px-1.5 py-0.5 rounded bg-slate-800 text-white font-mono font-bold">aA</span> ở góc trái thanh địa chỉ web phía dưới.</p>
+                        <p className="text-slate-400">2. Chọn <strong>Cài đặt trang web</strong> (Website Settings).</p>
+                        <p className="text-slate-400">3. Tại mục <strong>Vị trí</strong> (Location) ➔ chọn <strong>Cho phép</strong> (Allow) hoặc Hỏi.</p>
+                        <p className="text-slate-400">4. Nhấn nút <strong>"Chia sẻ lại vị trí GPS"</strong> ở trên hoặc kéo tải lại trang.</p>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                        <p className="font-bold text-emerald-300 flex items-center gap-1">
+                          🤖 Dành cho Android (Chrome / Trình duyệt):
+                        </p>
+                        <p className="text-slate-400">1. Nhấn biểu tượng <strong>ổ khóa 🔒</strong> ở góc thanh địa chỉ.</p>
+                        <p className="text-slate-400">2. Chọn <strong>Quyền</strong> ➔ <strong>Vị trí</strong> ➔ <strong>Cho phép</strong>.</p>
+                        <p className="text-slate-400">3. Nhấn nút <strong>"Chia sẻ lại vị trí GPS"</strong> hoặc tải lại trang.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Error Message */}
             {errorMessage && (
@@ -309,45 +397,78 @@ export const PublicAttendancePage: React.FC = () => {
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Nhập Mã Số Sinh Viên (MSSV) *
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Nhập Mã Số Sinh Viên (MSSV) *
+                  </label>
+                  {gpsStatus !== 'ready' && (
+                    <span className="text-[11px] text-red-400 font-semibold flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      Đang khóa (Chưa có GPS)
+                    </span>
+                  )}
+                </div>
+
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                    <User className="w-4 h-4" />
+                  <div className={`absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none ${
+                    gpsStatus !== 'ready' ? 'text-slate-600' : 'text-slate-400'
+                  }`}>
+                    {gpsStatus !== 'ready' ? <Lock className="w-4 h-4" /> : <User className="w-4 h-4" />}
                   </div>
                   <input
+                    ref={inputRef}
                     type="text"
                     required
-                    autoFocus
-                    placeholder="Ví dụ: 20210001"
+                    disabled={gpsStatus !== 'ready'}
+                    placeholder={
+                      gpsStatus !== 'ready'
+                        ? 'Bắt buộc chia sẻ vị trí để mở khóa nhập MSSV...'
+                        : 'Ví dụ: 20210001 hoặc DE190313'
+                    }
                     value={studentCode}
                     onChange={(e) => setStudentCode(e.target.value.toUpperCase())}
-                    className="glass-input w-full pl-10 pr-4 py-3 rounded-xl text-base font-mono tracking-wider text-white placeholder-slate-500 uppercase focus:border-indigo-500"
+                    className={`glass-input w-full pl-10 pr-4 py-3 rounded-xl text-base font-mono tracking-wider text-white placeholder-slate-500 uppercase transition-all ${
+                      gpsStatus !== 'ready'
+                        ? 'opacity-40 cursor-not-allowed bg-slate-900/50 border-slate-800 select-none'
+                        : 'focus:border-indigo-500 bg-slate-900/90'
+                    }`}
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1.5">
-                  Vui lòng nhập chính xác MSSV đã đăng ký trong danh sách lớp.
+                  {gpsStatus !== 'ready'
+                    ? '⚠️ Bạn phải chia sẻ vị trí thành công mới có thể nhập MSSV.'
+                    : 'Vui lòng nhập chính xác MSSV đã đăng ký trong danh sách lớp.'}
                 </p>
               </div>
 
-              <button
-                type="submit"
-                disabled={submitting || !studentCode.trim()}
-                className="w-full mt-2 py-3 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/40 active:scale-[0.99] transition-all flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Đang gửi điểm danh...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    <span>Xác Nhận Điểm Danh {isCheckIn ? 'Check-in' : 'Check-out'}</span>
-                  </>
-                )}
-              </button>
+              {gpsStatus === 'ready' && coords ? (
+                <button
+                  type="submit"
+                  disabled={submitting || !studentCode.trim()}
+                  className="w-full mt-2 py-3 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-lg shadow-indigo-600/30 hover:shadow-indigo-600/40 active:scale-[0.99] transition-all flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Đang gửi điểm danh...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Xác Nhận Điểm Danh {isCheckIn ? 'Check-in' : 'Check-out'}</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={requestGps}
+                  className="w-full mt-2 py-3 px-4 rounded-xl font-bold text-sm text-amber-300 bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/20 active:scale-[0.99] transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg shadow-amber-500/10"
+                >
+                  <MapPin className="w-4 h-4 text-amber-400" />
+                  <span>Chưa có vị trí - Bấm để chia sẻ vị trí</span>
+                </button>
+              )}
             </form>
           </div>
         )}

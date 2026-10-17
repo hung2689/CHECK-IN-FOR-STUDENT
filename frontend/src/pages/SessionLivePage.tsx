@@ -29,6 +29,7 @@ import {
   Info,
   Compass,
   Filter,
+  X,
 } from 'lucide-react';
 
 export const SessionLivePage: React.FC = () => {
@@ -61,10 +62,30 @@ export const SessionLivePage: React.FC = () => {
   const [savingGeofence, setSavingGeofence] = useState<boolean>(false);
   const [geofenceMessage, setGeofenceMessage] = useState<string | null>(null);
 
-  // Modals state
+  // Modals & Feedback state
+  const [approveModalAttempt, setApproveModalAttempt] = useState<AttendanceReviewAttempt | null>(null);
+  const [approveNote, setApproveNote] = useState<string>('Đã duyệt bởi giảng viên/trợ giảng');
   const [rejectModalAttempt, setRejectModalAttempt] = useState<AttendanceReviewAttempt | null>(null);
   const [rejectionReason, setRejectionReason] = useState<string>('');
   const [detailModalAttempt, setDetailModalAttempt] = useState<AttendanceReviewAttempt | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    description: string;
+    confirmText: string;
+    isDanger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage({ text, type });
+  };
+
+  useEffect(() => {
+    if (!toastMessage) return;
+    const timer = setTimeout(() => setToastMessage(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toastMessage]);
 
   const qrContainerRef = useRef<HTMLDivElement>(null);
 
@@ -120,26 +141,35 @@ export const SessionLivePage: React.FC = () => {
     try {
       const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/check-in/open`);
       setSession(res.data);
-      await fetchSessionData(true);
+      showToast('Đã mở giai đoạn Check-in (Đầu giờ)!', 'success');
+      fetchSessionData(true);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể mở Check-in.');
+      showToast(err.response?.data?.message || 'Không thể mở Check-in.', 'error');
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleCloseCheckIn = async () => {
-    if (!window.confirm('Bạn có chắc muốn chốt Check-in? Sinh viên sẽ không thể quét Check-in sau khi đóng.')) return;
-    setActionLoading(true);
-    try {
-      const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/check-in/close`);
-      setSession(res.data);
-      await fetchSessionData(true);
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể chốt Check-in.');
-    } finally {
-      setActionLoading(false);
-    }
+  const handleCloseCheckIn = () => {
+    setConfirmDialog({
+      title: 'Chốt Check-In Đầu Giờ',
+      description: 'Bạn có chắc muốn chốt Check-in? Sinh viên sẽ không thể quét Check-in sau khi đóng.',
+      confirmText: 'Chốt Check-In',
+      isDanger: false,
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/check-in/close`);
+          setSession(res.data);
+          showToast('Đã chốt Check-in thành công!', 'success');
+          fetchSessionData(true);
+        } catch (err: any) {
+          showToast(err.response?.data?.message || 'Không thể chốt Check-in.', 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   };
 
   const handleOpenCheckOut = async () => {
@@ -147,40 +177,57 @@ export const SessionLivePage: React.FC = () => {
     try {
       const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/check-out/open`);
       setSession(res.data);
-      await fetchSessionData(true);
+      showToast('Đã mở giai đoạn Check-out (Cuối giờ)!', 'success');
+      fetchSessionData(true);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể mở Check-out.');
+      showToast(err.response?.data?.message || 'Không thể mở Check-out.', 'error');
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleCloseCheckOut = async () => {
-    if (!window.confirm('Bạn có chắc muốn đóng Check-out và hoàn thành buổi điểm danh?')) return;
-    setActionLoading(true);
-    try {
-      const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/check-out/close`);
-      setSession(res.data);
-      await fetchSessionData(true);
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể chốt Check-out.');
-    } finally {
-      setActionLoading(false);
-    }
+  const handleCloseCheckOut = () => {
+    setConfirmDialog({
+      title: 'Đóng Check-Out & Hoàn Thành',
+      description: 'Bạn có chắc muốn đóng Check-out và hoàn thành buổi điểm danh này?',
+      confirmText: 'Hoàn Thành Buổi Học',
+      isDanger: false,
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/check-out/close`);
+          setSession(res.data);
+          showToast('Đã hoàn thành buổi điểm danh!', 'success');
+          fetchSessionData(true);
+        } catch (err: any) {
+          showToast(err.response?.data?.message || 'Không thể chốt Check-out.', 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   };
 
-  const handleCancelSession = async () => {
-    if (!window.confirm('CẢNH BÁO: Bạn có chắc muốn hủy buổi điểm danh này?')) return;
-    setActionLoading(true);
-    try {
-      const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/cancel`);
-      setSession(res.data);
-      await fetchSessionData(true);
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể hủy buổi điểm danh.');
-    } finally {
-      setActionLoading(false);
-    }
+  const handleCancelSession = () => {
+    setConfirmDialog({
+      title: 'Hủy Buổi Điểm Danh',
+      description: 'CẢNH BÁO: Bạn có chắc muốn hủy buổi điểm danh này? Hành động này sẽ dừng phiên điểm danh hiện tại.',
+      confirmText: 'Hủy Buổi Điểm Danh',
+      isDanger: true,
+      onConfirm: async () => {
+        setActionLoading(true);
+        try {
+          const res = await api.post<AttendanceSession>(`/api/attendance-sessions/${sessionId}/cancel`);
+          setSession(res.data);
+          showToast('Đã hủy buổi điểm danh.', 'info');
+          fetchSessionData(true);
+        } catch (err: any) {
+          showToast(err.response?.data?.message || 'Không thể hủy buổi điểm danh.', 'error');
+        } finally {
+          setActionLoading(false);
+        }
+      },
+    });
   };
 
   // Export report Excel
@@ -196,8 +243,9 @@ export const SessionLivePage: React.FC = () => {
       document.body.appendChild(link);
       link.click();
       link.remove();
+      showToast('Đang tải xuống báo cáo Excel...', 'success');
     } catch (err) {
-      alert('Không thể xuất file báo cáo.');
+      showToast('Không thể xuất file báo cáo.', 'error');
     }
   };
 
@@ -217,9 +265,10 @@ export const SessionLivePage: React.FC = () => {
       });
       setSession(res.data);
       setGeofenceMessage('Đã lưu cấu hình GPS Geofence thành công!');
+      showToast('Đã lưu cấu hình GPS Geofence!', 'success');
       setTimeout(() => setGeofenceMessage(null), 3000);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể lưu cấu hình Geofence.');
+      showToast(err.response?.data?.message || 'Không thể lưu cấu hình Geofence.', 'error');
     } finally {
       setSavingGeofence(false);
     }
@@ -228,50 +277,152 @@ export const SessionLivePage: React.FC = () => {
   // Use current browser location for Geofence center
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert('Trình duyệt không hỗ trợ Geolocation.');
+      showToast('Trình duyệt không hỗ trợ Geolocation.', 'error');
       return;
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setGeofenceLat(pos.coords.latitude.toFixed(6));
         setGeofenceLng(pos.coords.longitude.toFixed(6));
+        showToast('Đã lấy vị trí hiện tại của thiết bị!', 'info');
       },
       (err) => {
-        alert('Không thể lấy tọa độ hiện tại: ' + err.message);
+        showToast('Không thể lấy tọa độ hiện tại: ' + err.message, 'error');
       },
       { enableHighAccuracy: true }
     );
   };
 
-  // Review queue actions: Approve
-  const handleApproveAttempt = async (attempt: AttendanceReviewAttempt) => {
-    if (!window.confirm(`Xác nhận DUYỆT điểm danh cho sinh viên ${attempt.studentName} (${attempt.studentCode})?`)) return;
-    try {
-      await api.post(`/api/attendance-review-attempts/${attempt.id}/approve`, {
-        note: 'Đã duyệt bởi giảng viên/trợ giảng',
+  // Review queue actions: Approve (INSTANT OPTIMISTIC UPDATE)
+  const handleConfirmApprove = async () => {
+    if (!approveModalAttempt) return;
+    const attemptToApprove = approveModalAttempt;
+    const note = approveNote.trim() || 'Đã duyệt bởi giảng viên/trợ giảng';
+
+    // Đóng modal ngay lập tức để không cản trở thao tác
+    setApproveModalAttempt(null);
+
+    // 1. Snapshot previous state for rollback on error
+    const prevAttempts = [...reviewAttempts];
+    const prevStats = reviewStats ? { ...reviewStats } : null;
+    const prevRecords = [...records];
+
+    // 2. Optimistic Update: Cập nhật giao diện NGAY TỨC THÌ (< 1ms)
+    setReviewAttempts((prev) =>
+      prev.map((a) =>
+        a.id === attemptToApprove.id
+          ? {
+              ...a,
+              reviewStatus: 'APPROVED',
+              adminDecision: 'APPROVED',
+              adminNote: note,
+              reviewedAt: new Date().toISOString(),
+            }
+          : a
+      )
+    );
+
+    if (reviewStats) {
+      setReviewStats({
+        ...reviewStats,
+        pendingCount: Math.max(0, reviewStats.pendingCount - 1),
+        approvedCount: reviewStats.approvedCount + 1,
       });
-      await fetchSessionData(true);
+    }
+
+    setRecords((prev) =>
+      prev.map((r) => {
+        if (r.studentId === attemptToApprove.studentId) {
+          const nowIso = new Date().toISOString();
+          if (attemptToApprove.stage === 'CHECK_IN' && !r.checkInAt) {
+            return { ...r, checkInAt: attemptToApprove.submittedAt || nowIso };
+          }
+          if (attemptToApprove.stage === 'CHECK_OUT' && !r.checkOutAt) {
+            return { ...r, checkOutAt: attemptToApprove.submittedAt || nowIso };
+          }
+        }
+        return r;
+      })
+    );
+
+    showToast(`Đã duyệt điểm danh cho sinh viên ${attemptToApprove.studentName}!`, 'success');
+
+    // 3. Gửi API chạy ngầm ở background (không block UI)
+    try {
+      const res = await api.post<AttendanceReviewAttempt>(
+        `/api/attendance-review-attempts/${attemptToApprove.id}/approve`,
+        { note }
+      );
+      if (res.data) {
+        setReviewAttempts((prev) => prev.map((a) => (a.id === attemptToApprove.id ? res.data : a)));
+      }
+      fetchSessionData(true);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể duyệt yêu cầu này.');
+      // Revert if API fails
+      setReviewAttempts(prevAttempts);
+      setReviewStats(prevStats);
+      setRecords(prevRecords);
+      showToast(err.response?.data?.message || 'Không thể duyệt yêu cầu này.', 'error');
     }
   };
 
-  // Review queue actions: Reject confirm
+  // Review queue actions: Reject confirm (INSTANT OPTIMISTIC UPDATE)
   const handleConfirmReject = async () => {
     if (!rejectModalAttempt) return;
     if (!rejectionReason.trim()) {
-      alert('Vui lòng nhập lý do từ chối.');
+      showToast('Vui lòng nhập lý do từ chối.', 'error');
       return;
     }
-    try {
-      await api.post(`/api/attendance-review-attempts/${rejectModalAttempt.id}/reject`, {
-        reason: rejectionReason.trim(),
+    const attemptToReject = rejectModalAttempt;
+    const reason = rejectionReason.trim();
+
+    // Đóng modal ngay lập tức
+    setRejectModalAttempt(null);
+    setRejectionReason('');
+
+    // Snapshot previous state for rollback
+    const prevAttempts = [...reviewAttempts];
+    const prevStats = reviewStats ? { ...reviewStats } : null;
+
+    // Optimistic Update
+    setReviewAttempts((prev) =>
+      prev.map((a) =>
+        a.id === attemptToReject.id
+          ? {
+              ...a,
+              reviewStatus: 'REJECTED',
+              adminDecision: 'REJECTED',
+              adminNote: reason,
+              reviewedAt: new Date().toISOString(),
+            }
+          : a
+      )
+    );
+
+    if (reviewStats) {
+      setReviewStats({
+        ...reviewStats,
+        pendingCount: Math.max(0, reviewStats.pendingCount - 1),
+        rejectedCount: reviewStats.rejectedCount + 1,
       });
-      setRejectModalAttempt(null);
-      setRejectionReason('');
-      await fetchSessionData(true);
+    }
+
+    showToast(`Đã từ chối điểm danh của ${attemptToReject.studentName}.`, 'info');
+
+    // Gửi API ngầm ở background
+    try {
+      const res = await api.post<AttendanceReviewAttempt>(
+        `/api/attendance-review-attempts/${attemptToReject.id}/reject`,
+        { reason }
+      );
+      if (res.data) {
+        setReviewAttempts((prev) => prev.map((a) => (a.id === attemptToReject.id ? res.data : a)));
+      }
+      fetchSessionData(true);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể từ chối yêu cầu này.');
+      setReviewAttempts(prevAttempts);
+      setReviewStats(prevStats);
+      showToast(err.response?.data?.message || 'Không thể từ chối yêu cầu này.', 'error');
     }
   };
 
@@ -1030,15 +1181,21 @@ export const SessionLivePage: React.FC = () => {
                                   {isPending && (
                                     <>
                                       <button
-                                        onClick={() => handleApproveAttempt(a)}
-                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-sm"
+                                        onClick={() => {
+                                          setApproveModalAttempt(a);
+                                          setApproveNote('Đã duyệt bởi giảng viên/trợ giảng');
+                                        }}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-all shadow-sm hover:shadow-emerald-500/30 active:scale-95 cursor-pointer"
                                         title="Chấp nhận điểm danh"
                                       >
                                         Duyệt
                                       </button>
                                       <button
-                                        onClick={() => setRejectModalAttempt(a)}
-                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 transition-colors shadow-sm"
+                                        onClick={() => {
+                                          setRejectModalAttempt(a);
+                                          setRejectionReason('');
+                                        }}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 transition-all shadow-sm hover:shadow-red-500/30 active:scale-95 cursor-pointer"
                                         title="Từ chối điểm danh"
                                       >
                                         Từ chối
@@ -1047,7 +1204,7 @@ export const SessionLivePage: React.FC = () => {
                                   )}
                                   <button
                                     onClick={() => setDetailModalAttempt(a)}
-                                    className="p-1 rounded-lg text-slate-400 hover:text-white glass-card transition-colors"
+                                    className="p-1 rounded-lg text-slate-400 hover:text-white glass-card transition-colors cursor-pointer"
                                     title="Xem chi tiết tọa độ và lý do"
                                   >
                                     <Info className="w-3.5 h-3.5" />
@@ -1121,6 +1278,89 @@ export const SessionLivePage: React.FC = () => {
         </div>
       )}
 
+      {/* APPROVAL MODAL */}
+      {approveModalAttempt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md glass-panel rounded-3xl p-6 border border-emerald-500/30 shadow-2xl">
+            <div className="flex items-center space-x-3 mb-4 text-emerald-400">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Xác Nhận Duyệt Điểm Danh</h3>
+                <p className="text-[11px] text-slate-400">Chấp nhận kết quả điểm danh cho sinh viên</p>
+              </div>
+            </div>
+
+            {/* Student card info */}
+            <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2 mb-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-400">Sinh viên:</span>
+                <span className="text-xs font-bold text-white">{approveModalAttempt.studentName}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-400">MSSV:</span>
+                <span className="text-xs font-mono font-bold text-indigo-400">{approveModalAttempt.studentCode}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-400">Giai đoạn:</span>
+                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  approveModalAttempt.stage === 'CHECK_IN' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-purple-500/20 text-purple-300'
+                }`}>
+                  {approveModalAttempt.stage}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-400">Khoảng cách GPS:</span>
+                <span className="text-xs font-mono font-bold text-amber-400">
+                  {approveModalAttempt.distanceFromSchool != null ? `${Math.round(approveModalAttempt.distanceFromSchool)}m` : 'N/A'}
+                  {approveModalAttempt.gpsAccuracyM != null ? ` (±${Math.round(approveModalAttempt.gpsAccuracyM)}m)` : ''}
+                </span>
+              </div>
+              {approveModalAttempt.gpsResult && (
+                <div className="flex justify-between items-center pt-1 border-t border-slate-800">
+                  <span className="text-xs text-slate-400">Kết luận GPS:</span>
+                  <span className="text-[11px] font-bold text-red-400">
+                    {approveModalAttempt.gpsResult}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Ghi chú phê duyệt (Tùy chọn)
+              </label>
+              <input
+                type="text"
+                value={approveNote}
+                onChange={(e) => setApproveNote(e.target.value)}
+                placeholder="Đã duyệt bởi giảng viên/trợ giảng"
+                className="glass-input w-full p-3 rounded-xl text-xs text-white placeholder-slate-500 focus:border-emerald-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setApproveModalAttempt(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card cursor-pointer transition-colors"
+              >
+                Hủy
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmApprove}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 transition-all shadow-lg shadow-emerald-600/30 cursor-pointer active:scale-95"
+              >
+                Xác Nhận Duyệt
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DETAIL MODAL */}
       {detailModalAttempt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
@@ -1132,7 +1372,7 @@ export const SessionLivePage: React.FC = () => {
               </h3>
               <button
                 onClick={() => setDetailModalAttempt(null)}
-                className="text-slate-400 hover:text-white p-1"
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
               >
                 ✕
               </button>
@@ -1208,11 +1448,91 @@ export const SessionLivePage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setDetailModalAttempt(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card cursor-pointer"
               >
                 Đóng
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* GENERIC CONFIRMATION DIALOG (Thay thế window.confirm chốt Checkin, Checkout, Hủy) */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className={`w-full max-w-md glass-panel rounded-3xl p-6 border shadow-2xl ${
+            confirmDialog.isDanger ? 'border-red-500/40' : 'border-indigo-500/40'
+          }`}>
+            <div className="flex items-center space-x-3 mb-4">
+              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border ${
+                confirmDialog.isDanger
+                  ? 'bg-red-500/20 border-red-500/40 text-red-400'
+                  : 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400'
+              }`}>
+                {confirmDialog.isDanger ? <AlertTriangle className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
+              </div>
+              <h3 className="text-base font-bold text-white">{confirmDialog.title}</h3>
+            </div>
+
+            <p className="text-xs text-slate-300 mb-6 leading-relaxed">
+              {confirmDialog.description}
+            </p>
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card cursor-pointer transition-colors"
+              >
+                Hủy
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const onConfirm = confirmDialog.onConfirm;
+                  setConfirmDialog(null);
+                  onConfirm();
+                }}
+                className={`px-5 py-2 rounded-xl text-xs font-bold text-white transition-all shadow-lg cursor-pointer active:scale-95 ${
+                  confirmDialog.isDanger
+                    ? 'bg-red-600 hover:bg-red-500 shadow-red-600/30'
+                    : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'
+                }`}
+              >
+                {confirmDialog.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST NOTIFICATION BANNER */}
+      {toastMessage && (
+        <div className="fixed top-6 right-6 z-[100] max-w-sm animate-fade-in">
+          <div className={`flex items-center space-x-3 p-4 rounded-2xl border shadow-2xl backdrop-blur-xl ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
+              : toastMessage.type === 'error'
+              ? 'bg-red-950/90 border-red-500/40 text-red-200'
+              : 'bg-slate-900/90 border-slate-700 text-slate-200'
+          }`}>
+            <div className="flex-shrink-0">
+              {toastMessage.type === 'success' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              ) : toastMessage.type === 'error' ? (
+                <XCircle className="w-5 h-5 text-red-400" />
+              ) : (
+                <Info className="w-5 h-5 text-indigo-400" />
+              )}
+            </div>
+            <p className="text-xs font-medium flex-1">{toastMessage.text}</p>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="text-slate-400 hover:text-white p-1 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
