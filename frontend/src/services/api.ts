@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+// Khi chạy trên Vercel, luôn dùng URL tương đối '' để request đi qua Vercel Reverse Proxy (/api -> Render)
+// Điều này giúp cookie JSESSIONID trở thành First-Party, không bao giờ bị Safari/iOS chặn.
+const isVercel = typeof window !== 'undefined' && window.location.hostname.endsWith('vercel.app');
+const API_BASE_URL = isVercel ? '' : (import.meta.env.VITE_API_URL || '');
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

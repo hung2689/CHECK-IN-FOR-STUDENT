@@ -1,8 +1,13 @@
 {
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://check-in-for-student.onrender.com/api/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
 }
+
