@@ -11,5 +11,14 @@ public record SessionRequest(
     @NotNull(message = "Attendance date is required")
     LocalDate attendanceDate,
 
-    String description
-) {}
+    String description,
+
+    Double geofenceLat,
+    Double geofenceLng,
+    Integer geofenceRadiusM,
+    Boolean gpsEnforcement
+) {
+    public SessionRequest(String name, LocalDate attendanceDate, String description) {
+        this(name, attendanceDate, description, null, null, null, false);
+    }
+}

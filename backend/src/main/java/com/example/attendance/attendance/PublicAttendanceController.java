@@ -23,6 +23,6 @@ public class PublicAttendanceController {
     public ResponseEntity<PublicAttendanceResponse> submitAttendance(
             @PathVariable String token,
             @Valid @RequestBody PublicAttendanceRequest request) {
-        return ResponseEntity.ok(attendanceService.submitAttendance(token, request.studentCode()));
+        return ResponseEntity.ok(attendanceService.submitAttendance(token, request));
     }
 }

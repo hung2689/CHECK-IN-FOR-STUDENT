@@ -11,6 +11,8 @@ import {
   User,
   ShieldCheck,
   Send,
+  MapPin,
+  Compass,
 } from 'lucide-react';
 
 export const PublicAttendancePage: React.FC = () => {
@@ -23,10 +25,55 @@ export const PublicAttendancePage: React.FC = () => {
   const [result, setResult] = useState<PublicAttendanceResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // GPS state
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number; accuracy: number } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'acquiring' | 'ready' | 'denied' | 'unavailable'>('acquiring');
+  const [gpsReason, setGpsReason] = useState<string | null>(null);
+
   // Load saved studentCode from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('qr_student_code');
     if (saved) setStudentCode(saved);
+  }, []);
+
+  // Request GPS position early
+  const requestGps = () => {
+    if (!navigator.geolocation) {
+      setGpsStatus('unavailable');
+      setGpsReason('LOCATION_UNAVAILABLE');
+      return;
+    }
+
+    setGpsStatus('acquiring');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCoords({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        });
+        setGpsStatus('ready');
+        setGpsReason(null);
+      },
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          setGpsStatus('denied');
+          setGpsReason('LOCATION_PERMISSION_DENIED');
+        } else {
+          setGpsStatus('unavailable');
+          setGpsReason('LOCATION_UNAVAILABLE');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 15000,
+      }
+    );
+  };
+
+  useEffect(() => {
+    requestGps();
   }, []);
 
   // Validate token
@@ -59,10 +106,17 @@ export const PublicAttendancePage: React.FC = () => {
 
     const cleanCode = studentCode.trim().toUpperCase();
 
+    // Prepare payload
+    const payload = {
+      studentCode: cleanCode,
+      latitude: coords?.latitude || null,
+      longitude: coords?.longitude || null,
+      gpsAccuracyM: coords?.accuracy || null,
+      locationUnavailableReason: coords ? null : (gpsReason || 'LOCATION_UNAVAILABLE'),
+    };
+
     try {
-      const res = await api.post<PublicAttendanceResponse>(`/api/public/attendance/${token}`, {
-        studentCode: cleanCode,
-      });
+      const res = await api.post<PublicAttendanceResponse>(`/api/public/attendance/${token}`, payload);
       setResult(res.data);
       localStorage.setItem('qr_student_code', cleanCode);
     } catch (err: any) {
@@ -119,8 +173,51 @@ export const PublicAttendancePage: React.FC = () => {
           <p className="text-xs text-slate-400 mt-0.5">Hệ thống điểm danh lớp học tự động</p>
         </div>
 
-        {/* Success Screen */}
-        {result?.success ? (
+        {/* 1. Pending Review Screen */}
+        {result?.reviewRequired ? (
+          <div className="glass-panel rounded-3xl p-8 border border-amber-500/40 shadow-2xl text-center animate-fade-in bg-amber-950/10">
+            <div className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+              <Clock className="w-9 h-9" />
+            </div>
+
+            <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 mb-2 uppercase tracking-wider">
+              Chờ Giảng Viên Xác Nhận
+            </span>
+
+            <h2 className="text-xl font-extrabold text-white mb-1">
+              {result.studentName || 'Sinh viên'}
+            </h2>
+            <p className="text-xs font-mono text-amber-400 font-bold mb-4">
+              MSSV: {studentCode.toUpperCase()}
+            </p>
+
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs leading-relaxed mb-6 font-medium">
+              {result.message || 'Yêu cầu điểm danh của bạn đã được gửi và đang chờ giảng viên xác nhận. Lượt điểm danh chưa được xác nhận chính thức.'}
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 text-left text-xs space-y-2 mb-6">
+              <div className="flex justify-between text-slate-400">
+                <span>Môn học:</span>
+                <span className="text-slate-200 font-medium">{tokenInfo.className}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Buổi học:</span>
+                <span className="text-slate-200 font-medium">{tokenInfo.sessionName}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Thời gian gửi:</span>
+                <span className="text-amber-400 font-mono font-medium">
+                  {new Date().toLocaleTimeString('vi-VN')}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400">
+              Lượt điểm danh chưa được xác nhận chính thức. Giảng viên / Trợ giảng sẽ kiểm tra và xác nhận thủ công trên bảng điều khiển.
+            </div>
+          </div>
+        ) : result?.success ? (
+          /* 2. Success Screen */
           <div className="glass-panel rounded-3xl p-8 border border-emerald-500/30 shadow-2xl text-center animate-fade-in">
             <div className="w-16 h-16 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center mx-auto mb-4 border border-emerald-500/30 animate-pulse">
               <CheckCircle2 className="w-10 h-10" />
@@ -160,7 +257,7 @@ export const PublicAttendancePage: React.FC = () => {
             </div>
           </div>
         ) : (
-          /* Check-in Form Card */
+          /* 3. Check-in Form Card */
           <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-2xl">
             {/* Session Info Banner */}
             <div className="mb-6 p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
@@ -172,6 +269,33 @@ export const PublicAttendancePage: React.FC = () => {
               </div>
               <h3 className="text-sm font-bold text-white mt-1">{tokenInfo.className}</h3>
               <p className="text-xs text-slate-400">{tokenInfo.sessionName}</p>
+            </div>
+
+            {/* GPS Location Status Indicator */}
+            <div className="mb-5 p-3 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <MapPin className={`w-4 h-4 ${gpsStatus === 'ready' ? 'text-emerald-400' : gpsStatus === 'denied' ? 'text-red-400' : 'text-amber-400'}`} />
+                <span className="text-slate-300 font-medium">Vị trí GPS:</span>
+              </div>
+              <div>
+                {gpsStatus === 'ready' && coords && (
+                  <span className="text-emerald-400 font-mono">
+                    Đã nhận (±{Math.round(coords.accuracy)}m)
+                  </span>
+                )}
+                {gpsStatus === 'acquiring' && (
+                  <span className="text-amber-400 flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    Đang dò vị trí...
+                  </span>
+                )}
+                {gpsStatus === 'denied' && (
+                  <span className="text-red-400 font-medium">Chưa cấp quyền GPS</span>
+                )}
+                {gpsStatus === 'unavailable' && (
+                  <span className="text-slate-400 font-medium">Không khả dụng</span>
+                )}
+              </div>
             </div>
 
             {/* Error Message */}

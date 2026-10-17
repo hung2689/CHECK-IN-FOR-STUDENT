@@ -71,6 +71,13 @@ public class AttendanceSessionController {
         return ResponseEntity.ok(attendanceService.getAttendanceRecords(sessionId));
     }
 
+    @PutMapping("/api/attendance-sessions/{sessionId}/geofence")
+    public ResponseEntity<SessionResponse> updateGeofence(
+            @PathVariable Long sessionId,
+            @Valid @RequestBody GeofenceConfigRequest request) {
+        return ResponseEntity.ok(attendanceService.updateGeofence(sessionId, request));
+    }
+
     @DeleteMapping("/api/attendance-sessions/{sessionId}")
     public ResponseEntity<Void> deleteSession(@PathVariable Long sessionId) {
         attendanceService.deleteSession(sessionId);

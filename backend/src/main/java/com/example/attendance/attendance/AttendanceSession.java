@@ -38,6 +38,20 @@ public class AttendanceSession {
     @Column(name = "created_by")
     private Long createdBy;
 
+    // ── Geofence (optional, configured by TA when opening check-in) ──────────
+    @Column(name = "geofence_lat")
+    private Double geofenceLat;
+
+    @Column(name = "geofence_lng")
+    private Double geofenceLng;
+
+    @Column(name = "geofence_radius_m")
+    private Integer geofenceRadiusM;
+
+    @Column(name = "gps_enforcement", nullable = false)
+    private Boolean gpsEnforcement = false;
+    // ─────────────────────────────────────────────────────────────────────────
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -73,6 +87,15 @@ public class AttendanceSession {
     public void setCheckOutStatus(StageStatus checkOutStatus) { this.checkOutStatus = checkOutStatus; }
     public Long getCreatedBy() { return createdBy; }
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
+    public Double getGeofenceLat() { return geofenceLat; }
+    public void setGeofenceLat(Double geofenceLat) { this.geofenceLat = geofenceLat; }
+    public Double getGeofenceLng() { return geofenceLng; }
+    public void setGeofenceLng(Double geofenceLng) { this.geofenceLng = geofenceLng; }
+    public Integer getGeofenceRadiusM() { return geofenceRadiusM; }
+    public void setGeofenceRadiusM(Integer geofenceRadiusM) { this.geofenceRadiusM = geofenceRadiusM; }
+    public Boolean getGpsEnforcement() { return gpsEnforcement != null && gpsEnforcement; }
+    public void setGpsEnforcement(Boolean gpsEnforcement) { this.gpsEnforcement = gpsEnforcement; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }
+

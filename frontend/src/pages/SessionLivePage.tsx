@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import api from '../services/api';
-import { AttendanceSession, AttendanceRecord } from '../types';
+import { AttendanceSession, AttendanceRecord, AttendanceReviewAttempt, ReviewStats } from '../types';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   QrCode,
@@ -21,6 +21,14 @@ import {
   Check,
   Loader2,
   Sparkles,
+  MapPin,
+  ShieldAlert,
+  Clock,
+  XCircle,
+  CheckCircle2,
+  Info,
+  Compass,
+  Filter,
 } from 'lucide-react';
 
 export const SessionLivePage: React.FC = () => {
@@ -28,6 +36,9 @@ export const SessionLivePage: React.FC = () => {
 
   const [session, setSession] = useState<AttendanceSession | null>(null);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [reviewAttempts, setReviewAttempts] = useState<AttendanceReviewAttempt[]>([]);
+  const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -35,18 +46,50 @@ export const SessionLivePage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [searchRoster, setSearchRoster] = useState('');
 
+  // Active right-side tab: 'roster' | 'review'
+  const [activeTab, setActiveTab] = useState<'roster' | 'review'>('roster');
+
+  // Review queue filters
+  const [reviewStatusFilter, setReviewStatusFilter] = useState<string>('ALL');
+  const [reviewStageFilter, setReviewStageFilter] = useState<string>('ALL');
+
+  // Geofence configuration state
+  const [geofenceLat, setGeofenceLat] = useState<string>('');
+  const [geofenceLng, setGeofenceLng] = useState<string>('');
+  const [geofenceRadius, setGeofenceRadius] = useState<number>(150);
+  const [gpsEnforcement, setGpsEnforcement] = useState<boolean>(false);
+  const [savingGeofence, setSavingGeofence] = useState<boolean>(false);
+  const [geofenceMessage, setGeofenceMessage] = useState<string | null>(null);
+
+  // Modals state
+  const [rejectModalAttempt, setRejectModalAttempt] = useState<AttendanceReviewAttempt | null>(null);
+  const [rejectionReason, setRejectionReason] = useState<string>('');
+  const [detailModalAttempt, setDetailModalAttempt] = useState<AttendanceReviewAttempt | null>(null);
+
   const qrContainerRef = useRef<HTMLDivElement>(null);
 
-  // Fetch session & records
+  // Fetch session, records, review attempts, and review stats
   const fetchSessionData = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const [sessionRes, recordsRes] = await Promise.all([
+      const [sessionRes, recordsRes, reviewRes, statsRes] = await Promise.all([
         api.get<AttendanceSession>(`/api/attendance-sessions/${sessionId}`),
         api.get<AttendanceRecord[]>(`/api/attendance-sessions/${sessionId}/records`),
+        api.get<AttendanceReviewAttempt[]>(`/api/attendance-sessions/${sessionId}/review-attempts`),
+        api.get<ReviewStats>(`/api/attendance-sessions/${sessionId}/review-stats`),
       ]);
+
       setSession(sessionRes.data);
       setRecords(recordsRes.data);
+      setReviewAttempts(reviewRes.data);
+      setReviewStats(statsRes.data);
+
+      if (!silent) {
+        setGeofenceLat(sessionRes.data.geofenceLat != null ? sessionRes.data.geofenceLat.toString() : '');
+        setGeofenceLng(sessionRes.data.geofenceLng != null ? sessionRes.data.geofenceLng.toString() : '');
+        setGeofenceRadius(sessionRes.data.geofenceRadiusM || 150);
+        setGpsEnforcement(!!sessionRes.data.gpsEnforcement);
+      }
     } catch (err) {
       console.error('Error fetching session data', err);
     } finally {
@@ -58,7 +101,7 @@ export const SessionLivePage: React.FC = () => {
     fetchSessionData();
   }, [sessionId]);
 
-  // Polling every 3.5s if session is active & autoRefresh is true
+  // Polling every 3.5s if session is live & autoRefresh is true
   useEffect(() => {
     if (!autoRefresh) return;
     const isLive = session?.checkInStatus === 'OPEN' || session?.checkOutStatus === 'OPEN';
@@ -158,6 +201,80 @@ export const SessionLivePage: React.FC = () => {
     }
   };
 
+  // Geofence save
+  const handleSaveGeofence = async () => {
+    setSavingGeofence(true);
+    setGeofenceMessage(null);
+    try {
+      const lat = geofenceLat.trim() ? parseFloat(geofenceLat.trim()) : null;
+      const lng = geofenceLng.trim() ? parseFloat(geofenceLng.trim()) : null;
+
+      const res = await api.put<AttendanceSession>(`/api/attendance-sessions/${sessionId}/geofence`, {
+        geofenceLat: lat,
+        geofenceLng: lng,
+        geofenceRadiusM: geofenceRadius,
+        gpsEnforcement: gpsEnforcement,
+      });
+      setSession(res.data);
+      setGeofenceMessage('Đã lưu cấu hình GPS Geofence thành công!');
+      setTimeout(() => setGeofenceMessage(null), 3000);
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Không thể lưu cấu hình Geofence.');
+    } finally {
+      setSavingGeofence(false);
+    }
+  };
+
+  // Use current browser location for Geofence center
+  const handleUseCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Trình duyệt không hỗ trợ Geolocation.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGeofenceLat(pos.coords.latitude.toFixed(6));
+        setGeofenceLng(pos.coords.longitude.toFixed(6));
+      },
+      (err) => {
+        alert('Không thể lấy tọa độ hiện tại: ' + err.message);
+      },
+      { enableHighAccuracy: true }
+    );
+  };
+
+  // Review queue actions: Approve
+  const handleApproveAttempt = async (attempt: AttendanceReviewAttempt) => {
+    if (!window.confirm(`Xác nhận DUYỆT điểm danh cho sinh viên ${attempt.studentName} (${attempt.studentCode})?`)) return;
+    try {
+      await api.post(`/api/attendance-review-attempts/${attempt.id}/approve`, {
+        note: 'Đã duyệt bởi giảng viên/trợ giảng',
+      });
+      await fetchSessionData(true);
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Không thể duyệt yêu cầu này.');
+    }
+  };
+
+  // Review queue actions: Reject confirm
+  const handleConfirmReject = async () => {
+    if (!rejectModalAttempt) return;
+    if (!rejectionReason.trim()) {
+      alert('Vui lòng nhập lý do từ chối.');
+      return;
+    }
+    try {
+      await api.post(`/api/attendance-review-attempts/${rejectModalAttempt.id}/reject`, {
+        reason: rejectionReason.trim(),
+      });
+      setRejectModalAttempt(null);
+      setRejectionReason('');
+      await fetchSessionData(true);
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Không thể từ chối yêu cầu này.');
+    }
+  };
+
   // Fullscreen toggle for QR presentation
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -199,6 +316,16 @@ export const SessionLivePage: React.FC = () => {
       r.fullName.toLowerCase().includes(searchRoster.toLowerCase())
   );
 
+  const filteredReviewAttempts = reviewAttempts.filter((a) => {
+    if (reviewStatusFilter !== 'ALL' && a.reviewStatus !== reviewStatusFilter) return false;
+    if (reviewStageFilter !== 'ALL' && a.stage !== reviewStageFilter) return false;
+    if (searchRoster.trim()) {
+      const q = searchRoster.toLowerCase();
+      if (!a.studentCode.toLowerCase().includes(q) && !a.studentName.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
   const formatTime = (isoString?: string) => {
     if (!isoString) return '-';
     try {
@@ -235,7 +362,9 @@ export const SessionLivePage: React.FC = () => {
     );
   }
 
-  const absentCount = Math.max(0, session.totalStudents - session.checkedInCount);
+  const pendingCount = reviewStats?.pendingReviews ?? 0;
+  const rejectedCount = reviewStats?.rejectedAttempts ?? 0;
+  const suspiciousCount = reviewStats?.suspiciousAttempts ?? 0;
   const checkInPercent = session.totalStudents > 0
     ? Math.round((session.checkedInCount / session.totalStudents) * 100)
     : 0;
@@ -279,7 +408,7 @@ export const SessionLivePage: React.FC = () => {
           <div className="flex items-center space-x-3">
             <button
               onClick={handleExport}
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all"
+              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-semibold text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all shadow-sm"
             >
               <FileSpreadsheet className="w-4 h-4" />
               <span>Xuất Báo Cáo Excel</span>
@@ -287,62 +416,93 @@ export const SessionLivePage: React.FC = () => {
           </div>
         </div>
 
-        {/* 4 KPI Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="glass-card rounded-2xl p-4 border border-slate-800">
+        {/* 6 KPI Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 mb-8">
+          {/* 1. Tổng sinh viên */}
+          <div className="glass-card rounded-2xl p-3.5 border border-slate-800">
             <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium uppercase tracking-wider">Tổng Sinh Viên</span>
-              <Users className="w-4 h-4 text-indigo-400" />
+              <span className="text-[11px] font-medium uppercase tracking-wider">Sĩ Số Lớp</span>
+              <Users className="w-3.5 h-3.5 text-indigo-400" />
             </div>
             <div className="text-2xl font-black text-white">{session.totalStudents}</div>
-            <div className="text-[11px] text-slate-500 mt-1">Sĩ số danh sách lớp</div>
+            <div className="text-[10px] text-slate-500 mt-1">Tổng danh sách</div>
           </div>
 
-          <div className="glass-card rounded-2xl p-4 border border-slate-800">
+          {/* 2. Đã Check-in */}
+          <div className="glass-card rounded-2xl p-3.5 border border-slate-800">
             <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium uppercase tracking-wider">Đã Check-in</span>
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span className="text-[11px] font-medium uppercase tracking-wider">Đã Check-in</span>
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
             </div>
             <div className="text-2xl font-black text-emerald-400">
-              {session.checkedInCount} <span className="text-xs font-normal text-slate-400">({checkInPercent}%)</span>
+              {session.checkedInCount} <span className="text-[11px] font-normal text-slate-400">({checkInPercent}%)</span>
             </div>
-            <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-              <div
-                className="bg-emerald-500 h-full rounded-full transition-all duration-500"
-                style={{ width: `${checkInPercent}%` }}
-              />
+            <div className="w-full bg-slate-800 h-1 rounded-full mt-2 overflow-hidden">
+              <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${checkInPercent}%` }} />
             </div>
           </div>
 
-          <div className="glass-card rounded-2xl p-4 border border-slate-800">
+          {/* 3. Đã Check-out */}
+          <div className="glass-card rounded-2xl p-3.5 border border-slate-800">
             <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium uppercase tracking-wider">Đã Check-out</span>
-              <UserCheck className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px] font-medium uppercase tracking-wider">Đã Check-out</span>
+              <UserCheck className="w-3.5 h-3.5 text-blue-400" />
             </div>
-            <div className="text-2xl font-black text-amber-400">
-              {session.checkedOutCount} <span className="text-xs font-normal text-slate-400">({checkOutPercent}%)</span>
+            <div className="text-2xl font-black text-blue-400">
+              {session.checkedOutCount} <span className="text-[11px] font-normal text-slate-400">({checkOutPercent}%)</span>
             </div>
-            <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-              <div
-                className="bg-amber-500 h-full rounded-full transition-all duration-500"
-                style={{ width: `${checkOutPercent}%` }}
-              />
+            <div className="w-full bg-slate-800 h-1 rounded-full mt-2 overflow-hidden">
+              <div className="bg-blue-500 h-full rounded-full" style={{ width: `${checkOutPercent}%` }} />
             </div>
           </div>
 
-          <div className="glass-card rounded-2xl p-4 border border-slate-800">
+          {/* 4. Chờ Phê Duyệt (Warning pulse indicator) */}
+          <div
+            onClick={() => setActiveTab('review')}
+            className={`glass-card rounded-2xl p-3.5 border cursor-pointer transition-all ${
+              pendingCount > 0
+                ? 'border-amber-500/50 bg-amber-500/10 shadow-lg shadow-amber-500/10 hover:border-amber-400'
+                : 'border-slate-800'
+            }`}
+          >
             <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="text-xs font-medium uppercase tracking-wider">Vắng Mặt</span>
-              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <span className={`text-[11px] font-bold uppercase tracking-wider ${pendingCount > 0 ? 'text-amber-400' : ''}`}>
+                Chờ Phê Duyệt
+              </span>
+              <Clock className={`w-3.5 h-3.5 ${pendingCount > 0 ? 'text-amber-400 animate-spin' : 'text-slate-500'}`} />
             </div>
-            <div className="text-2xl font-black text-red-400">{absentCount}</div>
-            <div className="text-[11px] text-slate-500 mt-1">Chưa quét mã</div>
+            <div className={`text-2xl font-black ${pendingCount > 0 ? 'text-amber-400' : 'text-slate-300'}`}>
+              {pendingCount}
+            </div>
+            <div className="text-[10px] text-amber-400/80 mt-1 font-medium">
+              {pendingCount > 0 ? 'Cần giảng viên duyệt' : 'Không có yêu cầu'}
+            </div>
+          </div>
+
+          {/* 5. Đã từ chối */}
+          <div className="glass-card rounded-2xl p-3.5 border border-slate-800">
+            <div className="flex items-center justify-between text-slate-400 mb-1">
+              <span className="text-[11px] font-medium uppercase tracking-wider">Đã Từ Chối</span>
+              <XCircle className="w-3.5 h-3.5 text-red-400" />
+            </div>
+            <div className="text-2xl font-black text-red-400">{rejectedCount}</div>
+            <div className="text-[10px] text-slate-500 mt-1">Lượt không hợp lệ</div>
+          </div>
+
+          {/* 6. Nghi vấn ngoài vùng */}
+          <div className="glass-card rounded-2xl p-3.5 border border-slate-800">
+            <div className="flex items-center justify-between text-slate-400 mb-1">
+              <span className="text-[11px] font-medium uppercase tracking-wider">Ngoài Vùng GPS</span>
+              <ShieldAlert className="w-3.5 h-3.5 text-purple-400" />
+            </div>
+            <div className="text-2xl font-black text-purple-400">{suspiciousCount}</div>
+            <div className="text-[10px] text-slate-500 mt-1">Ngoài bán kính lớp</div>
           </div>
         </div>
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* LEFT: QR Code Presenter & Controls */}
+          {/* LEFT: QR Code Presenter & Geofence Settings */}
           <div className="lg:col-span-5 space-y-6">
             {/* QR Projection Card */}
             <div
@@ -497,21 +657,132 @@ export const SessionLivePage: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Geofence Configuration Card */}
+            <div className="glass-card rounded-2xl p-5 border border-slate-800">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-400" />
+                  <span>Cấu hình GPS Geofence Lớp Học</span>
+                </h4>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={gpsEnforcement}
+                    onChange={(e) => setGpsEnforcement(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              <p className="text-[11px] text-slate-400 mb-4">
+                Bật định vị để kiểm tra sinh viên có mặt tại lớp. Các lượt định vị không chắc chắn sẽ được chuyển vào hàng đợi phê duyệt.
+              </p>
+
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 uppercase font-semibold mb-1">Vĩ độ (Lat)</label>
+                    <input
+                      type="text"
+                      placeholder="vd: 10.776889"
+                      value={geofenceLat}
+                      onChange={(e) => setGeofenceLat(e.target.value)}
+                      className="glass-input w-full px-2.5 py-1.5 rounded-lg text-xs font-mono text-white placeholder-slate-600"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 uppercase font-semibold mb-1">Kinh độ (Lng)</label>
+                    <input
+                      type="text"
+                      placeholder="vd: 106.700806"
+                      value={geofenceLng}
+                      onChange={(e) => setGeofenceLng(e.target.value)}
+                      className="glass-input w-full px-2.5 py-1.5 rounded-lg text-xs font-mono text-white placeholder-slate-600"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-slate-400 uppercase font-semibold mb-1">
+                    Bán kính cho phép (mét): <strong className="text-white">{geofenceRadius}m</strong>
+                  </label>
+                  <input
+                    type="range"
+                    min="30"
+                    max="500"
+                    step="10"
+                    value={geofenceRadius}
+                    onChange={(e) => setGeofenceRadius(parseInt(e.target.value))}
+                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleUseCurrentLocation}
+                    className="inline-flex items-center space-x-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-colors"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>Lấy vị trí của tôi</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveGeofence}
+                    disabled={savingGeofence}
+                    className="inline-flex items-center space-x-1 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-colors ml-auto"
+                  >
+                    {savingGeofence ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    <span>Lưu cấu hình GPS</span>
+                  </button>
+                </div>
+
+                {geofenceMessage && (
+                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 text-[11px] font-medium text-center">
+                    {geofenceMessage}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* RIGHT: Live Roster & Real-time Submissions */}
+          {/* RIGHT: Tabs: Bảng Điểm Danh (Roster) & Hàng Đợi Duyệt (Review Queue) */}
           <div className="lg:col-span-7">
-            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col h-full min-h-[560px]">
-              {/* Header */}
-              <div className="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center space-x-2">
-                    <Users className="w-4 h-4 text-indigo-400" />
-                    <span>Danh Sách Điểm Danh Chi Tiết ({records.length} SV)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Tự động cập nhật theo thời gian thực khi sinh viên gửi điểm danh
-                  </p>
+            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col h-full min-h-[580px]">
+              {/* Tab Selector & Controls Header */}
+              <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60">
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setActiveTab('roster')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 ${
+                      activeTab === 'roster'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                        : 'text-slate-400 hover:text-white glass-card'
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Danh Sách Lớp ({records.length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('review')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2 relative ${
+                      activeTab === 'review'
+                        ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
+                        : 'text-slate-400 hover:text-white glass-card'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Hàng Đợi Duyệt GPS</span>
+                    {pendingCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-red-500 text-white animate-pulse">
+                        {pendingCount}
+                      </span>
+                    )}
+                  </button>
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -530,88 +801,421 @@ export const SessionLivePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Search input in roster */}
-              <div className="px-5 py-3 border-b border-slate-800/80 bg-slate-900/40">
+              {/* Sub-bar: Search & Filter */}
+              <div className="px-4 py-3 border-b border-slate-800/80 bg-slate-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <input
                   type="text"
                   placeholder="Lọc sinh viên theo tên hoặc MSSV..."
                   value={searchRoster}
                   onChange={(e) => setSearchRoster(e.target.value)}
-                  className="glass-input w-full px-3 py-1.5 rounded-xl text-xs text-white placeholder-slate-500"
+                  className="glass-input flex-1 px-3 py-1.5 rounded-xl text-xs text-white placeholder-slate-500"
                 />
+
+                {activeTab === 'review' && (
+                  <div className="flex items-center space-x-2">
+                    <select
+                      value={reviewStatusFilter}
+                      onChange={(e) => setReviewStatusFilter(e.target.value)}
+                      className="glass-input px-2.5 py-1.5 rounded-xl text-xs text-slate-200 bg-slate-900"
+                    >
+                      <option value="ALL">Tất cả trạng thái</option>
+                      <option value="PENDING_REVIEW">Chờ duyệt (PENDING)</option>
+                      <option value="APPROVED">Đã duyệt (APPROVED)</option>
+                      <option value="REJECTED">Đã từ chối (REJECTED)</option>
+                    </select>
+
+                    <select
+                      value={reviewStageFilter}
+                      onChange={(e) => setReviewStageFilter(e.target.value)}
+                      className="glass-input px-2.5 py-1.5 rounded-xl text-xs text-slate-200 bg-slate-900"
+                    >
+                      <option value="ALL">Tất cả giai đoạn</option>
+                      <option value="CHECK_IN">Check-in</option>
+                      <option value="CHECK_OUT">Check-out</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
-              {/* Roster Table */}
-              <div className="flex-1 overflow-x-auto overflow-y-auto max-h-[600px]">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
-                    <tr>
-                      <th className="py-3 px-4 font-semibold w-12 text-center">STT</th>
-                      <th className="py-3 px-4 font-semibold">MSSV</th>
-                      <th className="py-3 px-4 font-semibold">Họ và Tên</th>
-                      <th className="py-3 px-4 font-semibold">Check-in</th>
-                      <th className="py-3 px-4 font-semibold">Check-out</th>
-                      <th className="py-3 px-4 font-semibold text-center">Trạng Thái</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/40">
-                    {filteredRecords.map((r, index) => {
-                      const hasCheckIn = !!r.checkInAt;
-                      const hasCheckOut = !!r.checkOutAt;
+              {/* TAB 1: Roster Table */}
+              {activeTab === 'roster' && (
+                <div className="flex-1 overflow-x-auto overflow-y-auto max-h-[600px]">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4 font-semibold w-12 text-center">STT</th>
+                        <th className="py-3 px-4 font-semibold">MSSV</th>
+                        <th className="py-3 px-4 font-semibold">Họ và Tên</th>
+                        <th className="py-3 px-4 font-semibold">Check-in</th>
+                        <th className="py-3 px-4 font-semibold">Check-out</th>
+                        <th className="py-3 px-4 font-semibold text-center">Trạng Thái</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/40">
+                      {filteredRecords.map((r, index) => {
+                        const hasCheckIn = !!r.checkInAt;
+                        const hasCheckOut = !!r.checkOutAt;
+                        const status = r.attendanceStatus;
 
-                      return (
-                        <tr
-                          key={r.studentId}
-                          className={`hover:bg-slate-800/40 transition-colors ${
-                            hasCheckIn ? 'bg-emerald-500/[0.03]' : ''
-                          }`}
-                        >
-                          <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{index + 1}</td>
-                          <td className="py-2.5 px-4 font-mono font-bold text-indigo-400">{r.studentCode}</td>
-                          <td className="py-2.5 px-4 font-medium text-white">{r.fullName}</td>
-                          <td className="py-2.5 px-4 font-mono text-[11px]">
-                            {hasCheckIn ? (
-                              <span className="text-emerald-400 font-semibold">{formatTime(r.checkInAt)}</span>
-                            ) : (
-                              <span className="text-slate-600">-</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-4 font-mono text-[11px]">
-                            {hasCheckOut ? (
-                              <span className="text-amber-400 font-semibold">{formatTime(r.checkOutAt)}</span>
-                            ) : (
-                              <span className="text-slate-600">-</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-4 text-center">
-                            {hasCheckIn && hasCheckOut ? (
-                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                Đủ 2 lượt
-                              </span>
-                            ) : hasCheckIn ? (
-                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                Check-in
-                              </span>
-                            ) : hasCheckOut ? (
-                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                Check-out
-                              </span>
-                            ) : (
-                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
-                                Vắng
-                              </span>
-                            )}
-                          </td>
+                        return (
+                          <tr
+                            key={r.studentId}
+                            className={`hover:bg-slate-800/40 transition-colors ${
+                              hasCheckIn ? 'bg-emerald-500/[0.03]' : ''
+                            }`}
+                          >
+                            <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{index + 1}</td>
+                            <td className="py-2.5 px-4 font-mono font-bold text-indigo-400">{r.studentCode}</td>
+                            <td className="py-2.5 px-4 font-medium text-white">{r.fullName}</td>
+                            <td className="py-2.5 px-4 font-mono text-[11px]">
+                              {hasCheckIn ? (
+                                <span className="text-emerald-400 font-semibold">{formatTime(r.checkInAt)}</span>
+                              ) : (
+                                <span className="text-slate-600">-</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 font-mono text-[11px]">
+                              {hasCheckOut ? (
+                                <span className="text-amber-400 font-semibold">{formatTime(r.checkOutAt)}</span>
+                              ) : (
+                                <span className="text-slate-600">-</span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-center">
+                              {status === 'PRESENT' ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                  Đủ 2 lượt
+                                </span>
+                              ) : status === 'PENDING_REVIEW' ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
+                                  Chờ duyệt
+                                </span>
+                              ) : status === 'REJECTED' ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                                  Bị từ chối
+                                </span>
+                              ) : hasCheckIn ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                  Check-in
+                                </span>
+                              ) : hasCheckOut ? (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                  Check-out
+                                </span>
+                              ) : (
+                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                                  Vắng
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* TAB 2: Review Queue Table */}
+              {activeTab === 'review' && (
+                <div className="flex-1 overflow-x-auto overflow-y-auto max-h-[600px]">
+                  {filteredReviewAttempts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-12 text-slate-400">
+                      <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-2" />
+                      <p className="text-sm font-medium text-slate-300">Không có yêu cầu điểm danh nào cần duyệt</p>
+                      <p className="text-xs text-slate-500 mt-1">Các lượt quét vị trí không chắc chắn sẽ xuất hiện tại đây.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
+                        <tr>
+                          <th className="py-3 px-3 font-semibold">Sinh Viên</th>
+                          <th className="py-3 px-3 font-semibold">Giai đoạn</th>
+                          <th className="py-3 px-3 font-semibold">Khoảng Cách</th>
+                          <th className="py-3 px-3 font-semibold">Kết Quả GPS</th>
+                          <th className="py-3 px-3 font-semibold text-center">Trạng Thái</th>
+                          <th className="py-3 px-3 font-semibold text-center">Thao Tác</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {filteredReviewAttempts.map((a) => {
+                          const isPending = a.reviewStatus === 'PENDING_REVIEW';
+                          const isApproved = a.reviewStatus === 'APPROVED';
+                          const isRejected = a.reviewStatus === 'REJECTED';
+
+                          return (
+                            <tr
+                              key={a.id}
+                              className={`hover:bg-slate-800/40 transition-colors ${
+                                isPending ? 'bg-amber-500/[0.04]' : ''
+                              }`}
+                            >
+                              <td className="py-2.5 px-3">
+                                <div className="font-bold text-white">{a.studentName}</div>
+                                <div className="text-[11px] font-mono text-indigo-400">{a.studentCode}</div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">{formatTime(a.submittedAt)}</div>
+                              </td>
+
+                              <td className="py-2.5 px-3">
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  a.stage === 'CHECK_IN' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-purple-500/20 text-purple-300'
+                                }`}>
+                                  {a.stage}
+                                </span>
+                              </td>
+
+                              <td className="py-2.5 px-3 font-mono text-[11px]">
+                                {a.distanceFromSchool != null ? (
+                                  <div>
+                                    <span className="font-semibold text-slate-200">
+                                      {Math.round(a.distanceFromSchool)}m
+                                    </span>
+                                    {a.gpsAccuracyM != null && (
+                                      <span className="text-[10px] text-slate-400 block">
+                                        ±{Math.round(a.gpsAccuracyM)}m
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-500">Không có vị trí</span>
+                                )}
+                              </td>
+
+                              <td className="py-2.5 px-3">
+                                {a.gpsResult === 'BOUNDARY' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                    Gần ranh giới
+                                  </span>
+                                ) : a.gpsResult === 'POOR_ACCURACY' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                                    Sai số lớn
+                                  </span>
+                                ) : a.gpsResult === 'OUTSIDE_GEOFENCE' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30">
+                                    Ngoài vùng
+                                  </span>
+                                ) : a.gpsResult === 'NO_LOCATION' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-700 text-slate-300">
+                                    Không vị trí
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300">
+                                    {a.gpsResult || 'Hợp lệ'}
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-2.5 px-3 text-center">
+                                {isPending ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
+                                    CHỜ DUYỆT
+                                  </span>
+                                ) : isApproved ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    ĐÃ DUYỆT
+                                  </span>
+                                ) : isRejected ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                                    TỪ CHỐI
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400">
+                                    {a.reviewStatus}
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="py-2.5 px-3 text-center">
+                                <div className="flex items-center justify-center space-x-1">
+                                  {isPending && (
+                                    <>
+                                      <button
+                                        onClick={() => handleApproveAttempt(a)}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 transition-colors shadow-sm"
+                                        title="Chấp nhận điểm danh"
+                                      >
+                                        Duyệt
+                                      </button>
+                                      <button
+                                        onClick={() => setRejectModalAttempt(a)}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 transition-colors shadow-sm"
+                                        title="Từ chối điểm danh"
+                                      >
+                                        Từ chối
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    onClick={() => setDetailModalAttempt(a)}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-white glass-card transition-colors"
+                                    title="Xem chi tiết tọa độ và lý do"
+                                  >
+                                    <Info className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </main>
+
+      {/* REJECTION MODAL */}
+      {rejectModalAttempt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md glass-panel rounded-3xl p-6 border border-red-500/30 shadow-2xl">
+            <div className="flex items-center space-x-3 mb-4 text-red-400">
+              <AlertTriangle className="w-6 h-6 flex-shrink-0" />
+              <h3 className="text-base font-bold text-white">Từ Chối Yêu Cầu Điểm Danh</h3>
+            </div>
+
+            <p className="text-xs text-slate-300 mb-4 leading-relaxed">
+              Bạn đang từ chối điểm danh cho sinh viên{' '}
+              <strong className="text-white">{rejectModalAttempt.studentName}</strong> ({rejectModalAttempt.studentCode}).
+              Lượt điểm danh này sẽ không được tính.
+            </p>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 uppercase">
+                Lý do từ chối * (Bắt buộc)
+              </label>
+              <textarea
+                rows={3}
+                required
+                placeholder="Ví dụ: Vị trí ở cách xa lớp học quá 500m, không chứng minh được có mặt tại giảng đường..."
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                className="glass-input w-full p-3 rounded-xl text-xs text-white placeholder-slate-500 focus:border-red-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectModalAttempt(null);
+                  setRejectionReason('');
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card"
+              >
+                Hủy
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmReject}
+                disabled={!rejectionReason.trim()}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 disabled:opacity-50 transition-all shadow-lg shadow-red-600/30"
+              >
+                Xác Nhận Từ Chối
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DETAIL MODAL */}
+      {detailModalAttempt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg glass-panel rounded-3xl p-6 border border-slate-700 shadow-2xl">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-indigo-400" />
+                <span>Chi Tiết Xác Thực Vị Trí Điểm Danh</span>
+              </h3>
+              <button
+                onClick={() => setDetailModalAttempt(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Sinh viên:</span>
+                  <span className="font-bold text-white">{detailModalAttempt.studentName}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">MSSV:</span>
+                  <span className="font-mono text-indigo-400 font-bold">{detailModalAttempt.studentCode}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Giai đoạn:</span>
+                  <span className="font-semibold text-slate-200">{detailModalAttempt.stage}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">Thời gian gửi:</span>
+                  <span className="font-mono text-slate-200">{formatTime(detailModalAttempt.submittedAt)}</span>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+                <h4 className="font-bold text-slate-300 uppercase text-[11px] tracking-wider">Thông số GPS:</h4>
+                <div className="flex justify-between text-slate-400">
+                  <span>Tọa độ sinh viên:</span>
+                  <span className="font-mono text-slate-200">
+                    {detailModalAttempt.latitude != null && detailModalAttempt.longitude != null
+                      ? `${detailModalAttempt.latitude.toFixed(6)}, ${detailModalAttempt.longitude.toFixed(6)}`
+                      : 'Không có'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Sai số GPS (Accuracy):</span>
+                  <span className="font-mono text-slate-200">
+                    {detailModalAttempt.gpsAccuracyM != null ? `±${Math.round(detailModalAttempt.gpsAccuracyM)} mét` : 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Khoảng cách tới lớp:</span>
+                  <span className="font-mono font-bold text-amber-400">
+                    {detailModalAttempt.distanceFromSchool != null ? `${Math.round(detailModalAttempt.distanceFromSchool)} mét` : 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Kết luận GPS:</span>
+                  <span className="font-bold text-indigo-300">{detailModalAttempt.gpsResult}</span>
+                </div>
+                <div className="pt-1 text-slate-300 text-[11px] leading-relaxed">
+                  <strong>Lý do hệ thống:</strong> {detailModalAttempt.gpsReason || 'Không có mô tả'}
+                </div>
+              </div>
+
+              {detailModalAttempt.adminDecision && (
+                <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-[11px]">
+                  <div className="font-bold text-slate-300 mb-1">
+                    Quyết định giảng viên: <span className="text-white">{detailModalAttempt.adminDecision}</span>
+                  </div>
+                  {detailModalAttempt.reviewerUsername && (
+                    <div className="text-slate-400">Duyệt bởi: {detailModalAttempt.reviewerUsername}</div>
+                  )}
+                  {detailModalAttempt.adminNote && (
+                    <div className="text-slate-300 mt-1">Ghi chú: {detailModalAttempt.adminNote}</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setDetailModalAttempt(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

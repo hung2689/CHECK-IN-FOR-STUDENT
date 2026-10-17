@@ -1,9 +1,10 @@
 package com.example.attendance.attendance;
 
+import com.example.attendance.auth.User;
+import com.example.attendance.auth.UserRepository;
 import com.example.attendance.classmanagement.ClassEntity;
 import com.example.attendance.classmanagement.ClassRepository;
 import com.example.attendance.exception.BadRequestException;
-import com.example.attendance.exception.ConflictException;
 import com.example.attendance.exception.ResourceNotFoundException;
 import com.example.attendance.student.ClassStudentRepository;
 import com.example.attendance.student.Student;
@@ -30,9 +31,11 @@ public class AttendanceService {
     private final AttendanceSessionRepository sessionRepository;
     private final AttendanceTokenRepository tokenRepository;
     private final AttendanceRecordRepository recordRepository;
+    private final AttendanceReviewAttemptRepository reviewAttemptRepository;
     private final ClassRepository classRepository;
     private final ClassStudentRepository classStudentRepository;
     private final StudentRepository studentRepository;
+    private final UserRepository userRepository;
 
     @Value("${app.token.expiry-hours:24}")
     private int tokenExpiryHours;
@@ -40,15 +43,19 @@ public class AttendanceService {
     public AttendanceService(AttendanceSessionRepository sessionRepository,
                              AttendanceTokenRepository tokenRepository,
                              AttendanceRecordRepository recordRepository,
+                             AttendanceReviewAttemptRepository reviewAttemptRepository,
                              ClassRepository classRepository,
                              ClassStudentRepository classStudentRepository,
-                             StudentRepository studentRepository) {
+                             StudentRepository studentRepository,
+                             UserRepository userRepository) {
         this.sessionRepository = sessionRepository;
         this.tokenRepository = tokenRepository;
         this.recordRepository = recordRepository;
+        this.reviewAttemptRepository = reviewAttemptRepository;
         this.classRepository = classRepository;
         this.classStudentRepository = classStudentRepository;
         this.studentRepository = studentRepository;
+        this.userRepository = userRepository;
     }
 
     public List<SessionResponse> getSessionsByClass(Long classId) {
@@ -75,9 +82,42 @@ public class AttendanceService {
         session.setDescription(request.description());
         session.setAttendanceDate(request.attendanceDate());
         session.setCreatedBy(createdBy);
-        session = sessionRepository.save(session);
 
-        log.info("Session created: id={}, classId={}, name={}", session.getId(), classId, session.getName());
+        if (request.geofenceLat() != null && request.geofenceLng() != null) {
+            session.setGeofenceLat(request.geofenceLat());
+            session.setGeofenceLng(request.geofenceLng());
+            session.setGeofenceRadiusM(request.geofenceRadiusM() != null ? request.geofenceRadiusM() : 150);
+            session.setGpsEnforcement(request.gpsEnforcement() != null && request.gpsEnforcement());
+        } else {
+            session.setGpsEnforcement(false);
+        }
+
+        session = sessionRepository.save(session);
+        log.info("Session created: id={}, classId={}, name={}, gpsEnforced={}",
+                session.getId(), classId, session.getName(), session.getGpsEnforcement());
+        return toSessionResponse(session);
+    }
+
+    @Transactional
+    public SessionResponse updateGeofence(Long sessionId, GeofenceConfigRequest request) {
+        AttendanceSession session = getSessionEntity(sessionId);
+        validateSessionNotCancelled(session);
+
+        session.setGeofenceLat(request.geofenceLat());
+        session.setGeofenceLng(request.geofenceLng());
+        if (request.geofenceRadiusM() != null) {
+            session.setGeofenceRadiusM(request.geofenceRadiusM());
+        } else if (session.getGeofenceRadiusM() == null) {
+            session.setGeofenceRadiusM(150);
+        }
+        if (request.gpsEnforcement() != null) {
+            session.setGpsEnforcement(request.gpsEnforcement());
+        }
+
+        session = sessionRepository.save(session);
+        log.info("Geofence updated for session id={}: lat={}, lng={}, radius={}m, enforced={}",
+                sessionId, session.getGeofenceLat(), session.getGeofenceLng(),
+                session.getGeofenceRadiusM(), session.getGpsEnforcement());
         return toSessionResponse(session);
     }
 
@@ -188,6 +228,7 @@ public class AttendanceService {
     @Transactional
     public void deleteSession(Long sessionId) {
         AttendanceSession session = getSessionEntity(sessionId);
+        reviewAttemptRepository.deleteBySessionId(sessionId);
         recordRepository.deleteBySessionId(sessionId);
         tokenRepository.deleteBySessionId(sessionId);
         sessionRepository.delete(session);
@@ -225,9 +266,13 @@ public class AttendanceService {
                 token.getStage().name(), session.getAttendanceDate().toString(), null);
     }
 
-    @Transactional
     public PublicAttendanceResponse submitAttendance(String tokenValue, String studentCode) {
-        studentCode = studentCode.trim();
+        return submitAttendance(tokenValue, new PublicAttendanceRequest(studentCode, null, null, null, null));
+    }
+
+    @Transactional
+    public PublicAttendanceResponse submitAttendance(String tokenValue, PublicAttendanceRequest request) {
+        String studentCode = request.studentCode().trim();
 
         AttendanceToken token = tokenRepository.findByTokenValue(tokenValue)
                 .orElseThrow(() -> new BadRequestException("Invalid attendance token."));
@@ -262,22 +307,174 @@ public class AttendanceService {
             throw new BadRequestException("Student code not found in this class.");
         }
 
-        // Process attendance
+        // Check if student already has a confirmed record for this stage
+        Optional<AttendanceRecord> existing = recordRepository
+                .findBySessionIdAndStudentId(session.getId(), student.getId());
+
         if (stage == AttendanceStage.CHECK_IN) {
-            return processCheckIn(session, student);
+            if (existing.isPresent() && existing.get().getCheckInAt() != null) {
+                return new PublicAttendanceResponse(true, student.getFullName(),
+                        "CHECK_IN", "VERIFIED", false, "You have already checked in successfully.");
+            }
         } else {
-            return processCheckOut(session, student);
+            // Check-out requires valid prior check-in
+            if (existing.isEmpty() || existing.get().getCheckInAt() == null) {
+                throw new BadRequestException("Bạn chưa hoàn thành Check-in, không thể Check-out.");
+            }
+            if (existing.get().getCheckOutAt() != null) {
+                return new PublicAttendanceResponse(true, student.getFullName(),
+                        "CHECK_OUT", "VERIFIED", false, "You have already checked out successfully.");
+            }
         }
+
+        // Evaluate GPS if enabled
+        GpsEvaluationResult eval = evaluateGps(session, request);
+
+        if (eval.autoAccept()) {
+            // Case A or GPS disabled: accept immediately
+            if (stage == AttendanceStage.CHECK_IN) {
+                return processCheckIn(session, student, eval.result());
+            } else {
+                return processCheckOut(session, student, eval.result());
+            }
+        }
+
+        // Case B / C / D: GPS uncertain, poor accuracy, boundary, outside, or missing location
+        // Queue for administrative review
+        Optional<AttendanceReviewAttempt> pendingOpt = reviewAttemptRepository
+                .findBySessionIdAndStudentIdAndStageAndReviewStatus(
+                        session.getId(), student.getId(), stage, "PENDING_REVIEW");
+
+        AttendanceReviewAttempt attempt = pendingOpt.orElseGet(() -> {
+            AttendanceReviewAttempt a = new AttendanceReviewAttempt();
+            a.setSessionId(session.getId());
+            a.setStudentId(student.getId());
+            a.setStage(stage);
+            return a;
+        });
+
+        attempt.setSubmittedAt(Instant.now());
+        attempt.setLatitude(request.latitude());
+        attempt.setLongitude(request.longitude());
+        attempt.setGpsAccuracyM(request.gpsAccuracyM());
+        attempt.setDistanceFromSchool(eval.distanceMetres());
+        attempt.setGpsResult(eval.result());
+        attempt.setGpsReason(eval.reason());
+        attempt.setReviewStatus("PENDING_REVIEW");
+        reviewAttemptRepository.save(attempt);
+
+        log.warn("Attendance attempt queued for review: session={}, student={}, stage={}, result={}, reason={}",
+                session.getId(), student.getStudentCode(), stage, eval.result(), eval.reason());
+
+        return new PublicAttendanceResponse(
+                false,
+                student.getFullName(),
+                stage.name(),
+                eval.result(),
+                true,
+                "Yêu cầu điểm danh của bạn đã được gửi và đang chờ giảng viên xác nhận. Lượt điểm danh chưa được xác nhận chính thức."
+        );
     }
 
-    private PublicAttendanceResponse processCheckIn(AttendanceSession session, Student student) {
-        // Try to create or get existing record
+    public record GpsEvaluationResult(
+            String result,
+            String reason,
+            Double distanceMetres,
+            boolean autoAccept
+    ) {}
+
+    public static double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
+        final double R = 6371000.0; // metres
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+    }
+
+    public GpsEvaluationResult evaluateGps(AttendanceSession session, PublicAttendanceRequest request) {
+        if (!Boolean.TRUE.equals(session.getGpsEnforcement())) {
+            return new GpsEvaluationResult("DISABLED", "GPS enforcement is disabled", null, true);
+        }
+
+        if (session.getGeofenceLat() == null || session.getGeofenceLng() == null) {
+            return new GpsEvaluationResult("DISABLED", "Session geofence not configured", null, true);
+        }
+
+        // Case D: Location unavailable or denied
+        if (request.latitude() == null || request.longitude() == null) {
+            String reason = request.locationUnavailableReason();
+            if (reason == null || reason.isBlank()) {
+                reason = "LOCATION_UNAVAILABLE";
+            }
+            return new GpsEvaluationResult("NO_LOCATION", reason, null, false);
+        }
+
+        double centerLat = session.getGeofenceLat();
+        double centerLng = session.getGeofenceLng();
+        double studentLat = request.latitude();
+        double studentLng = request.longitude();
+
+        double distance = calculateHaversineDistance(centerLat, centerLng, studentLat, studentLng);
+        double accuracy = request.gpsAccuracyM() != null ? request.gpsAccuracyM() : 0.0;
+        int radius = session.getGeofenceRadiusM() != null ? session.getGeofenceRadiusM() : 150;
+
+        // Case B1: Poor GPS accuracy (> 100 metres)
+        if (accuracy > 100.0) {
+            return new GpsEvaluationResult(
+                    "POOR_ACCURACY",
+                    String.format("Độ chính xác GPS quá thấp (±%.0fm > 100m, khoảng cách %.0fm)", accuracy, distance),
+                    distance,
+                    false
+            );
+        }
+
+        // Case B2: Boundary uncertainty
+        // Condition:
+        // 1) Inside radius, but uncertainty circle extends outside (distance + accuracy > radius + 15m)
+        // 2) Outside radius, but accuracy circle covers radius or very close (distance - accuracy <= radius || distance <= radius + 25m)
+        boolean isNearBoundary = (distance <= radius && (distance + accuracy > radius + 15.0)) ||
+                (distance > radius && ((distance - accuracy <= radius) || (distance <= radius + 25.0)));
+
+        if (isNearBoundary) {
+            return new GpsEvaluationResult(
+                    "BOUNDARY",
+                    String.format("Nằm gần ranh giới khu vực lớp học (khoảng cách: %.0fm, bán kính: %dm, sai số: ±%.0fm)",
+                            distance, radius, accuracy),
+                    distance,
+                    false
+            );
+        }
+
+        // Case A: Confidently inside
+        if (distance <= radius) {
+            return new GpsEvaluationResult(
+                    "VERIFIED",
+                    String.format("Vị trí hợp lệ trong khuôn viên (cách %.0fm)", distance),
+                    distance,
+                    true
+            );
+        }
+
+        // Case C: Clearly outside
+        return new GpsEvaluationResult(
+                "OUTSIDE_GEOFENCE",
+                String.format("Ngoài khuôn viên lớp học (khoảng cách: %.0fm, bán kính: %dm, sai số: ±%.0fm)",
+                        distance, radius, accuracy),
+                distance,
+                false
+        );
+    }
+
+    private PublicAttendanceResponse processCheckIn(AttendanceSession session, Student student, String gpsResult) {
         Optional<AttendanceRecord> existing = recordRepository
                 .findBySessionIdAndStudentId(session.getId(), student.getId());
 
         if (existing.isPresent() && existing.get().getCheckInAt() != null) {
             return new PublicAttendanceResponse(true, student.getFullName(),
-                    "CHECK_IN", "You have already checked in successfully.");
+                    "CHECK_IN", gpsResult, false, "You have already checked in successfully.");
         }
 
         try {
@@ -291,39 +488,279 @@ public class AttendanceService {
             recordRepository.save(record);
 
             return new PublicAttendanceResponse(true, student.getFullName(),
-                    "CHECK_IN", "Check-in successful!");
+                    "CHECK_IN", gpsResult, false, "Check-in successful!");
         } catch (DataIntegrityViolationException e) {
-            // Concurrent duplicate - still treat as success
             return new PublicAttendanceResponse(true, student.getFullName(),
-                    "CHECK_IN", "You have already checked in successfully.");
+                    "CHECK_IN", gpsResult, false, "You have already checked in successfully.");
         }
     }
 
-    private PublicAttendanceResponse processCheckOut(AttendanceSession session, Student student) {
+    private PublicAttendanceResponse processCheckOut(AttendanceSession session, Student student, String gpsResult) {
         try {
             AttendanceRecord record = recordRepository
                     .findBySessionIdAndStudentId(session.getId(), student.getId())
-                    .orElseGet(() -> {
-                        AttendanceRecord newRec = new AttendanceRecord();
-                        newRec.setSessionId(session.getId());
-                        newRec.setStudentId(student.getId());
-                        return newRec;
-                    });
+                    .orElseThrow(() -> new BadRequestException("Bạn chưa hoàn thành Check-in, không thể Check-out."));
+
+            if (record.getCheckInAt() == null) {
+                throw new BadRequestException("Bạn chưa hoàn thành Check-in, không thể Check-out.");
+            }
 
             if (record.getCheckOutAt() != null) {
                 return new PublicAttendanceResponse(true, student.getFullName(),
-                        "CHECK_OUT", "You have already checked out successfully.");
+                        "CHECK_OUT", gpsResult, false, "You have already checked out successfully.");
             }
 
             record.setCheckOutAt(Instant.now());
             recordRepository.save(record);
 
             return new PublicAttendanceResponse(true, student.getFullName(),
-                    "CHECK_OUT", "Check-out successful!");
+                    "CHECK_OUT", gpsResult, false, "Check-out successful!");
         } catch (DataIntegrityViolationException e) {
             return new PublicAttendanceResponse(true, student.getFullName(),
-                    "CHECK_OUT", "You have already checked out successfully.");
+                    "CHECK_OUT", gpsResult, false, "You have already checked out successfully.");
         }
+    }
+
+    // ── Administrative Review Workflow ─────────────────────────────────────────
+
+    public List<AttendanceReviewAttemptResponse> getReviewAttempts(Long sessionId, String status, AttendanceStage stage) {
+        AttendanceSession session = getSessionEntity(sessionId);
+        List<AttendanceReviewAttempt> attempts;
+
+        if (status != null && !status.isBlank() && stage != null) {
+            attempts = reviewAttemptRepository
+                    .findBySessionIdAndStageAndReviewStatusOrderBySubmittedAtDesc(sessionId, stage, status);
+        } else if (status != null && !status.isBlank()) {
+            attempts = reviewAttemptRepository
+                    .findBySessionIdAndReviewStatusOrderBySubmittedAtDesc(sessionId, status);
+        } else if (stage != null) {
+            attempts = reviewAttemptRepository
+                    .findBySessionIdAndStageOrderBySubmittedAtDesc(sessionId, stage);
+        } else {
+            attempts = reviewAttemptRepository.findBySessionIdOrderBySubmittedAtDesc(sessionId);
+        }
+
+        // Cache student & reviewer user lookups
+        Map<Long, Student> studentMap = new HashMap<>();
+        Map<Long, User> userMap = new HashMap<>();
+
+        return attempts.stream().map(a -> {
+            Student student = studentMap.computeIfAbsent(a.getStudentId(),
+                    id -> studentRepository.findById(id).orElse(null));
+            User reviewer = a.getReviewedBy() != null
+                    ? userMap.computeIfAbsent(a.getReviewedBy(), id -> userRepository.findById(id).orElse(null))
+                    : null;
+
+            return new AttendanceReviewAttemptResponse(
+                    a.getId(),
+                    a.getSessionId(),
+                    session.getName(),
+                    a.getStudentId(),
+                    student != null ? student.getStudentCode() : "N/A",
+                    student != null ? student.getFullName() : "N/A",
+                    a.getStage().name(),
+                    a.getSubmittedAt(),
+                    a.getLatitude(),
+                    a.getLongitude(),
+                    a.getGpsAccuracyM(),
+                    a.getDistanceFromSchool(),
+                    a.getGpsResult(),
+                    a.getGpsReason(),
+                    a.getReviewStatus(),
+                    a.getReviewedBy(),
+                    reviewer != null ? reviewer.getUsername() : null,
+                    a.getReviewedAt(),
+                    a.getAdminDecision(),
+                    a.getAdminNote()
+            );
+        }).toList();
+    }
+
+    public ReviewStatsResponse getReviewStats(Long sessionId) {
+        AttendanceSession session = getSessionEntity(sessionId);
+        long totalStudents = classStudentRepository.countByClassId(session.getClassId());
+        long confirmedCheckIns = recordRepository.countCheckedIn(sessionId);
+        long confirmedCheckOuts = recordRepository.countCheckedOut(sessionId);
+        long pendingReviews = reviewAttemptRepository.countBySessionIdAndReviewStatus(sessionId, "PENDING_REVIEW");
+        long rejectedAttempts = reviewAttemptRepository.countBySessionIdAndReviewStatus(sessionId, "REJECTED");
+        long suspiciousAttempts = reviewAttemptRepository.countBySessionIdAndGpsResult(sessionId, "OUTSIDE_GEOFENCE");
+
+        return new ReviewStatsResponse(
+                totalStudents,
+                confirmedCheckIns,
+                confirmedCheckOuts,
+                pendingReviews,
+                rejectedAttempts,
+                suspiciousAttempts
+        );
+    }
+
+    @Transactional
+    public AttendanceReviewAttemptResponse approveReviewAttempt(Long attemptId, Long adminUserId, String note) {
+        AttendanceReviewAttempt attempt = reviewAttemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review attempt not found"));
+
+        AttendanceSession session = getSessionEntity(attempt.getSessionId());
+        Student student = studentRepository.findById(attempt.getStudentId())
+                .orElseThrow(() -> new ResourceNotFoundException("Student not found"));
+
+        // If stage is CHECK_OUT, check-out approval requires a valid prior check-in!
+        if (attempt.getStage() == AttendanceStage.CHECK_OUT) {
+            Optional<AttendanceRecord> priorRecord = recordRepository
+                    .findBySessionIdAndStudentId(attempt.getSessionId(), attempt.getStudentId());
+            if (priorRecord.isEmpty() || priorRecord.get().getCheckInAt() == null) {
+                throw new BadRequestException("Check-out approval requires a valid prior check-in.");
+            }
+        }
+
+        // Create or update official AttendanceRecord exactly once
+        final Long sessionId = attempt.getSessionId();
+        final Long studentId = attempt.getStudentId();
+        AttendanceRecord record = recordRepository
+                .findBySessionIdAndStudentId(sessionId, studentId)
+                .orElseGet(() -> {
+                    AttendanceRecord r = new AttendanceRecord();
+                    r.setSessionId(sessionId);
+                    r.setStudentId(studentId);
+                    return r;
+                });
+
+        Instant recordTime = attempt.getSubmittedAt() != null ? attempt.getSubmittedAt() : Instant.now();
+        if (attempt.getStage() == AttendanceStage.CHECK_IN) {
+            if (record.getCheckInAt() == null) {
+                record.setCheckInAt(recordTime);
+            }
+        } else {
+            if (record.getCheckOutAt() == null) {
+                record.setCheckOutAt(recordTime);
+            }
+        }
+        recordRepository.save(record);
+
+        // Update attempt record
+        attempt.setReviewStatus("APPROVED");
+        attempt.setAdminDecision("APPROVED");
+        attempt.setReviewedBy(adminUserId);
+        attempt.setReviewedAt(Instant.now());
+        attempt.setAdminNote(note);
+        attempt = reviewAttemptRepository.save(attempt);
+
+        log.info("Attendance review attempt approved: attemptId={}, studentId={}, stage={}, byAdmin={}",
+                attemptId, student.getId(), attempt.getStage(), adminUserId);
+
+        User reviewer = userRepository.findById(adminUserId).orElse(null);
+        return new AttendanceReviewAttemptResponse(
+                attempt.getId(),
+                attempt.getSessionId(),
+                session.getName(),
+                student.getId(),
+                student.getStudentCode(),
+                student.getFullName(),
+                attempt.getStage().name(),
+                attempt.getSubmittedAt(),
+                attempt.getLatitude(),
+                attempt.getLongitude(),
+                attempt.getGpsAccuracyM(),
+                attempt.getDistanceFromSchool(),
+                attempt.getGpsResult(),
+                attempt.getGpsReason(),
+                attempt.getReviewStatus(),
+                attempt.getReviewedBy(),
+                reviewer != null ? reviewer.getUsername() : null,
+                attempt.getReviewedAt(),
+                attempt.getAdminDecision(),
+                attempt.getAdminNote()
+        );
+    }
+
+    @Transactional
+    public AttendanceReviewAttemptResponse rejectReviewAttempt(Long attemptId, Long adminUserId, String reason) {
+        if (reason == null || reason.trim().isBlank()) {
+            throw new BadRequestException("Rejection reason is required.");
+        }
+
+        AttendanceReviewAttempt attempt = reviewAttemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review attempt not found"));
+
+        AttendanceSession session = getSessionEntity(attempt.getSessionId());
+        Student student = studentRepository.findById(attempt.getStudentId())
+                .orElseThrow(() -> new ResourceNotFoundException("Student not found"));
+
+        attempt.setReviewStatus("REJECTED");
+        attempt.setAdminDecision("REJECTED");
+        attempt.setReviewedBy(adminUserId);
+        attempt.setReviewedAt(Instant.now());
+        attempt.setAdminNote(reason.trim());
+        attempt = reviewAttemptRepository.save(attempt);
+
+        log.info("Attendance review attempt rejected: attemptId={}, studentId={}, stage={}, byAdmin={}, reason={}",
+                attemptId, student.getId(), attempt.getStage(), adminUserId, reason);
+
+        User reviewer = userRepository.findById(adminUserId).orElse(null);
+        return new AttendanceReviewAttemptResponse(
+                attempt.getId(),
+                attempt.getSessionId(),
+                session.getName(),
+                student.getId(),
+                student.getStudentCode(),
+                student.getFullName(),
+                attempt.getStage().name(),
+                attempt.getSubmittedAt(),
+                attempt.getLatitude(),
+                attempt.getLongitude(),
+                attempt.getGpsAccuracyM(),
+                attempt.getDistanceFromSchool(),
+                attempt.getGpsResult(),
+                attempt.getGpsReason(),
+                attempt.getReviewStatus(),
+                attempt.getReviewedBy(),
+                reviewer != null ? reviewer.getUsername() : null,
+                attempt.getReviewedAt(),
+                attempt.getAdminDecision(),
+                attempt.getAdminNote()
+        );
+    }
+
+    @Transactional
+    public AttendanceReviewAttemptResponse markReviewed(Long attemptId, Long adminUserId, String note) {
+        AttendanceReviewAttempt attempt = reviewAttemptRepository.findById(attemptId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review attempt not found"));
+
+        AttendanceSession session = getSessionEntity(attempt.getSessionId());
+        Student student = studentRepository.findById(attempt.getStudentId())
+                .orElseThrow(() -> new ResourceNotFoundException("Student not found"));
+
+        attempt.setReviewStatus("REVIEWED");
+        attempt.setReviewedBy(adminUserId);
+        attempt.setReviewedAt(Instant.now());
+        if (note != null && !note.trim().isBlank()) {
+            attempt.setAdminNote(note.trim());
+        }
+        attempt = reviewAttemptRepository.save(attempt);
+
+        User reviewer = userRepository.findById(adminUserId).orElse(null);
+        return new AttendanceReviewAttemptResponse(
+                attempt.getId(),
+                attempt.getSessionId(),
+                session.getName(),
+                student.getId(),
+                student.getStudentCode(),
+                student.getFullName(),
+                attempt.getStage().name(),
+                attempt.getSubmittedAt(),
+                attempt.getLatitude(),
+                attempt.getLongitude(),
+                attempt.getGpsAccuracyM(),
+                attempt.getDistanceFromSchool(),
+                attempt.getGpsResult(),
+                attempt.getGpsReason(),
+                attempt.getReviewStatus(),
+                attempt.getReviewedBy(),
+                reviewer != null ? reviewer.getUsername() : null,
+                attempt.getReviewedAt(),
+                attempt.getAdminDecision(),
+                attempt.getAdminNote()
+        );
     }
 
     // Dashboard records
@@ -331,15 +768,22 @@ public class AttendanceService {
         AttendanceSession session = getSessionEntity(sessionId);
         List<Student> students = studentRepository.findStudentsByClassId(session.getClassId());
         List<AttendanceRecord> records = recordRepository.findBySessionId(sessionId);
+        List<AttendanceReviewAttempt> attempts = reviewAttemptRepository.findBySessionIdOrderBySubmittedAtDesc(sessionId);
 
         Map<Long, AttendanceRecord> recordMap = new HashMap<>();
         for (AttendanceRecord r : records) {
             recordMap.put(r.getStudentId(), r);
         }
 
+        Map<Long, List<AttendanceReviewAttempt>> attemptMap = new HashMap<>();
+        for (AttendanceReviewAttempt a : attempts) {
+            attemptMap.computeIfAbsent(a.getStudentId(), k -> new ArrayList<>()).add(a);
+        }
+
         return students.stream().map(student -> {
             AttendanceRecord record = recordMap.get(student.getId());
-            String status = computeAttendanceStatus(record, session);
+            List<AttendanceReviewAttempt> studentAttempts = attemptMap.getOrDefault(student.getId(), List.of());
+            String status = computeAttendanceStatus(record, studentAttempts);
 
             return new AttendanceRecordResponse(
                     record != null ? record.getId() : null,
@@ -353,22 +797,32 @@ public class AttendanceService {
         }).toList();
     }
 
-    private String computeAttendanceStatus(AttendanceRecord record, AttendanceSession session) {
-        if (record == null) {
-            return "ABSENT";
-        }
-        boolean hasCheckIn = record.getCheckInAt() != null;
-        boolean hasCheckOut = record.getCheckOutAt() != null;
+    private String computeAttendanceStatus(AttendanceRecord record, List<AttendanceReviewAttempt> studentAttempts) {
+        boolean hasCheckIn = record != null && record.getCheckInAt() != null;
+        boolean hasCheckOut = record != null && record.getCheckOutAt() != null;
 
         if (hasCheckIn && hasCheckOut) return "PRESENT";
         if (hasCheckIn && !hasCheckOut) {
-            // If check-out is still open or not opened, it's provisional
-            if (session.getCheckOutStatus() == StageStatus.CLOSED) {
-                return "MISSING_CHECK_OUT";
-            }
+            boolean hasPendingCheckOut = studentAttempts.stream()
+                    .anyMatch(a -> a.getStage() == AttendanceStage.CHECK_OUT && "PENDING_REVIEW".equals(a.getReviewStatus()));
+            if (hasPendingCheckOut) return "PENDING_REVIEW";
             return "MISSING_CHECK_OUT";
         }
         if (!hasCheckIn && hasCheckOut) return "MISSING_CHECK_IN";
+
+        // If not checked in officially, check review attempts
+        boolean hasPending = studentAttempts.stream()
+                .anyMatch(a -> "PENDING_REVIEW".equals(a.getReviewStatus()));
+        if (hasPending) {
+            return "PENDING_REVIEW";
+        }
+
+        boolean hasRejected = studentAttempts.stream()
+                .anyMatch(a -> "REJECTED".equals(a.getReviewStatus()));
+        if (hasRejected) {
+            return "REJECTED";
+        }
+
         return "ABSENT";
     }
 
@@ -377,6 +831,7 @@ public class AttendanceService {
         long totalStudents = classStudentRepository.countByClassId(session.getClassId());
         long checkedIn = recordRepository.countCheckedIn(session.getId());
         long checkedOut = recordRepository.countCheckedOut(session.getId());
+        long pendingReviews = reviewAttemptRepository.countBySessionIdAndReviewStatus(session.getId(), "PENDING_REVIEW");
 
         // Get active tokens
         String checkInToken = getActiveToken(session.getId(), AttendanceStage.CHECK_IN);
@@ -398,7 +853,12 @@ public class AttendanceService {
                 totalStudents,
                 checkedIn,
                 checkedOut,
-                session.getCreatedAt()
+                session.getCreatedAt(),
+                session.getGeofenceLat(),
+                session.getGeofenceLng(),
+                session.getGeofenceRadiusM(),
+                session.getGpsEnforcement(),
+                pendingReviews
         );
     }
 
