@@ -31,7 +31,10 @@ public class DataSourceConfig {
         }
 
         HikariDataSource dataSource = new HikariDataSource();
-        dataSource.setDriverClassName("org.postgresql.Driver");
+        String driver = StringUtils.hasText(properties.getDriverClassName())
+                ? properties.getDriverClassName()
+                : "org.postgresql.Driver";
+        dataSource.setDriverClassName(driver);
 
         if (StringUtils.hasText(rawUrl)) {
             Matcher matcher = USERINFO_PATTERN.matcher(rawUrl);
