@@ -35,7 +35,8 @@ export const PublicAttendancePage: React.FC = () => {
   const [coords, setCoords] = useState<{ latitude: number; longitude: number; accuracy: number } | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'acquiring' | 'ready' | 'denied' | 'unavailable'>('acquiring');
   const [gpsReason, setGpsReason] = useState<string | null>(null);
-  const [showGpsGuide, setShowGpsGuide] = useState(true);
+  const [isRetryingGps, setIsRetryingGps] = useState(false);
+  const [showDeniedModal, setShowDeniedModal] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -53,14 +54,16 @@ export const PublicAttendancePage: React.FC = () => {
   }, [gpsStatus]);
 
   // Request GPS position
-  const requestGps = () => {
+  const requestGps = (isManualClick = false) => {
     if (!navigator.geolocation) {
       setGpsStatus('unavailable');
       setGpsReason('LOCATION_UNAVAILABLE');
       return;
     }
 
+    if (isManualClick) setIsRetryingGps(true);
     setGpsStatus('acquiring');
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setCoords({
@@ -70,11 +73,16 @@ export const PublicAttendancePage: React.FC = () => {
         });
         setGpsStatus('ready');
         setGpsReason(null);
+        setIsRetryingGps(false);
       },
       (err) => {
+        setIsRetryingGps(false);
         if (err.code === err.PERMISSION_DENIED) {
           setGpsStatus('denied');
           setGpsReason('LOCATION_PERMISSION_DENIED');
+          if (isManualClick) {
+            setShowDeniedModal(true);
+          }
         } else {
           setGpsStatus('unavailable');
           setGpsReason('LOCATION_UNAVAILABLE');
@@ -82,7 +90,7 @@ export const PublicAttendancePage: React.FC = () => {
       },
       {
         enableHighAccuracy: true,
-        timeout: 12000,
+        timeout: 10000,
         maximumAge: 0,
       }
     );
@@ -339,50 +347,22 @@ export const PublicAttendancePage: React.FC = () => {
                 {/* Nút bấm chia sẻ lại vị trí */}
                 <button
                   type="button"
-                  onClick={requestGps}
-                  className="w-full py-2.5 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 shadow-md shadow-red-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all mt-1"
+                  onClick={() => requestGps(true)}
+                  disabled={isRetryingGps}
+                  className="w-full py-3 px-4 rounded-xl font-bold text-xs text-white bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 hover:from-red-500 hover:to-amber-500 shadow-md shadow-red-600/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all mt-2 disabled:opacity-60"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Chia sẻ lại vị trí GPS</span>
-                </button>
-
-                {/* Hướng dẫn chi tiết cho iPhone & Android khi lỡ nhấn Từ chối */}
-                <div className="mt-3 pt-3 border-t border-red-500/20">
-                  <button
-                    type="button"
-                    onClick={() => setShowGpsGuide(!showGpsGuide)}
-                    className="w-full flex items-center justify-between text-[11px] font-semibold text-amber-300 hover:text-amber-200 cursor-pointer"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Smartphone className="w-3.5 h-3.5" />
-                      <span>Hướng dẫn nếu lỡ nhấn "Từ chối" trên điện thoại</span>
-                    </span>
-                    {showGpsGuide ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  </button>
-
-                  {showGpsGuide && (
-                    <div className="mt-2.5 space-y-2 text-[11px] text-slate-300 animate-fade-in">
-                      <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
-                        <p className="font-bold text-indigo-300 flex items-center gap-1">
-                          📱 Dành cho iPhone (Safari):
-                        </p>
-                        <p className="text-slate-400">1. Nhấn vào biểu tượng <span className="px-1.5 py-0.5 rounded bg-slate-800 text-white font-mono font-bold">aA</span> ở góc trái thanh địa chỉ web phía dưới.</p>
-                        <p className="text-slate-400">2. Chọn <strong>Cài đặt trang web</strong> (Website Settings).</p>
-                        <p className="text-slate-400">3. Tại mục <strong>Vị trí</strong> (Location) ➔ chọn <strong>Cho phép</strong> (Allow) hoặc Hỏi.</p>
-                        <p className="text-slate-400">4. Nhấn nút <strong>"Chia sẻ lại vị trí GPS"</strong> ở trên hoặc kéo tải lại trang.</p>
-                      </div>
-
-                      <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
-                        <p className="font-bold text-emerald-300 flex items-center gap-1">
-                          🤖 Dành cho Android (Chrome / Trình duyệt):
-                        </p>
-                        <p className="text-slate-400">1. Nhấn biểu tượng <strong>ổ khóa 🔒</strong> ở góc thanh địa chỉ.</p>
-                        <p className="text-slate-400">2. Chọn <strong>Quyền</strong> ➔ <strong>Vị trí</strong> ➔ <strong>Cho phép</strong>.</p>
-                        <p className="text-slate-400">3. Nhấn nút <strong>"Chia sẻ lại vị trí GPS"</strong> hoặc tải lại trang.</p>
-                      </div>
-                    </div>
+                  {isRetryingGps ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Đang kết nối GPS...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Chia sẻ lại vị trí GPS</span>
+                    </>
                   )}
-                </div>
+                </button>
               </div>
             )}
 
@@ -462,17 +442,63 @@ export const PublicAttendancePage: React.FC = () => {
               ) : (
                 <button
                   type="button"
-                  onClick={requestGps}
-                  className="w-full mt-2 py-3 px-4 rounded-xl font-bold text-sm text-amber-300 bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/20 active:scale-[0.99] transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg shadow-amber-500/10"
+                  onClick={() => requestGps(true)}
+                  disabled={isRetryingGps}
+                  className="w-full mt-2 py-3 px-4 rounded-xl font-bold text-sm text-amber-300 bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/20 active:scale-[0.99] transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-lg shadow-amber-500/10 disabled:opacity-60"
                 >
-                  <MapPin className="w-4 h-4 text-amber-400" />
-                  <span>Chưa có vị trí - Bấm để chia sẻ vị trí</span>
+                  {isRetryingGps ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                      <span>Đang kết nối GPS...</span>
+                    </>
+                  ) : (
+                    <>
+                      <MapPin className="w-4 h-4 text-amber-400" />
+                      <span>Chưa có vị trí - Bấm để chia sẻ vị trí</span>
+                    </>
+                  )}
                 </button>
               )}
             </form>
           </div>
         )}
       </div>
+
+      {/* DENIED PERMISSION MODAL */}
+      {showDeniedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm glass-panel rounded-3xl p-6 border border-amber-500/30 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-3 border border-amber-500/30">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-white mb-2">Trình Duyệt Đang Chặn Vị Trí</h3>
+            <p className="text-xs text-slate-300 leading-relaxed mb-4">
+              Do bạn đã nhấn <strong>"Từ chối"</strong> trước đó, hệ điều hành (Apple iOS / Android) đã khóa quyền và không tự bật lại cửa sổ hỏi nữa.
+            </p>
+            <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-left text-xs text-slate-300 mb-5 space-y-1.5">
+              <p className="font-bold text-indigo-300">Cách để cửa sổ hỏi lại:</p>
+              <p>• Nhấn vào biểu tượng <strong className="text-white px-1.5 py-0.5 rounded bg-slate-800">aA</strong> (ở góc trái thanh địa chỉ Safari) ➔ <strong>Cài đặt trang web</strong> ➔ đổi Vị trí thành <strong>Hỏi</strong> hoặc <strong>Cho phép</strong>.</p>
+              <p>• Hoặc mở lại link trong một <strong>Tab Ẩn danh (Private Tab)</strong> mới.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDeniedModal(false)}
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card cursor-pointer"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 cursor-pointer shadow-lg shadow-indigo-600/30"
+              >
+                Tải lại trang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
