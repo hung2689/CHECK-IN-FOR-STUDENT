@@ -464,38 +464,37 @@ export const PublicAttendancePage: React.FC = () => {
         )}
       </div>
 
-      {/* DENIED PERMISSION MODAL */}
+      {/* REQUIRED LOCATION POPUP MODAL */}
       {showDeniedModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm glass-panel rounded-3xl p-6 border border-amber-500/30 shadow-2xl text-center">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-3 border border-amber-500/30">
-              <AlertTriangle className="w-6 h-6" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-sm glass-panel rounded-3xl p-6 border border-amber-500/40 shadow-2xl text-center">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto mb-4 border border-amber-500/30">
+              <MapPin className="w-7 h-7" />
             </div>
-            <h3 className="text-base font-bold text-white mb-2">Trình Duyệt Đang Chặn Vị Trí</h3>
-            <p className="text-xs text-slate-300 leading-relaxed mb-4">
-              Do bạn đã nhấn <strong>"Từ chối"</strong> trước đó, hệ điều hành (Apple iOS / Android) đã khóa quyền và không tự bật lại cửa sổ hỏi nữa.
+
+            <h3 className="text-base font-extrabold text-white mb-2 uppercase tracking-wide">
+              Yêu Cầu Vị Trí GPS
+            </h3>
+
+            <p className="text-sm font-semibold text-amber-300 mb-2 leading-relaxed">
+              Bạn bắt buộc phải chia sẻ vị trí mới có thể điểm danh.
             </p>
-            <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-left text-xs text-slate-300 mb-5 space-y-1.5">
-              <p className="font-bold text-indigo-300">Cách để cửa sổ hỏi lại:</p>
-              <p>• Nhấn vào biểu tượng <strong className="text-white px-1.5 py-0.5 rounded bg-slate-800">aA</strong> (ở góc trái thanh địa chỉ Safari) ➔ <strong>Cài đặt trang web</strong> ➔ đổi Vị trí thành <strong>Hỏi</strong> hoặc <strong>Cho phép</strong>.</p>
-              <p>• Hoặc mở lại link trong một <strong>Tab Ẩn danh (Private Tab)</strong> mới.</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowDeniedModal(false)}
-                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold text-slate-300 hover:text-white glass-card cursor-pointer"
-              >
-                Đóng
-              </button>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 cursor-pointer shadow-lg shadow-indigo-600/30"
-              >
-                Tải lại trang
-              </button>
-            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed mb-6">
+              Hệ thống cần xác thực bạn đang có mặt tại lớp học để mở khóa nhập MSSV và hoàn tất lượt điểm danh.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowDeniedModal(false);
+                requestGps(true);
+              }}
+              className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>Thử lại / Chia sẻ vị trí</span>
+            </button>
           </div>
         </div>
       )}
