@@ -325,8 +325,15 @@ export const SessionLivePage: React.FC = () => {
     if (reviewStats) {
       setReviewStats({
         ...reviewStats,
-        pendingCount: Math.max(0, reviewStats.pendingCount - 1),
-        approvedCount: reviewStats.approvedCount + 1,
+        pendingReviews: Math.max(0, reviewStats.pendingReviews - 1),
+        confirmedCheckIns:
+          attemptToApprove.stage === 'CHECK_IN'
+            ? reviewStats.confirmedCheckIns + 1
+            : reviewStats.confirmedCheckIns,
+        confirmedCheckOuts:
+          attemptToApprove.stage === 'CHECK_OUT'
+            ? reviewStats.confirmedCheckOuts + 1
+            : reviewStats.confirmedCheckOuts,
       });
     }
 
@@ -402,8 +409,8 @@ export const SessionLivePage: React.FC = () => {
     if (reviewStats) {
       setReviewStats({
         ...reviewStats,
-        pendingCount: Math.max(0, reviewStats.pendingCount - 1),
-        rejectedCount: reviewStats.rejectedCount + 1,
+        pendingReviews: Math.max(0, reviewStats.pendingReviews - 1),
+        rejectedAttempts: reviewStats.rejectedAttempts + 1,
       });
     }
 
