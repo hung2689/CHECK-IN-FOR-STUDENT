@@ -311,7 +311,7 @@ export const PublicAttendancePage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={requestGps}
+                  onClick={() => requestGps(true)}
                   className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-slate-300 hover:text-white glass-card flex items-center gap-1 cursor-pointer transition-colors"
                   title="Cập nhật lại tọa độ"
                 >
