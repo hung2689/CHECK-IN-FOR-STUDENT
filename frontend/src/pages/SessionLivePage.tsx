@@ -908,8 +908,8 @@ export const SessionLivePage: React.FC = () => {
           </div>
 
           {/* RIGHT: Tabs: Bảng Điểm Danh (Roster) & Hàng Đợi Duyệt (Review Queue) */}
-          <div className="lg:col-span-7">
-            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col h-full min-h-[580px]">
+          <div className="lg:col-span-7 flex flex-col min-h-0">
+            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col flex-1 h-full min-h-[580px]">
               {/* Tab Selector & Controls Header */}
               <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60">
                 <div className="flex items-center space-x-2">
@@ -997,86 +997,94 @@ export const SessionLivePage: React.FC = () => {
 
               {/* TAB 1: Roster Table */}
               {activeTab === 'roster' && (
-                <div className="flex-1 overflow-x-auto overflow-y-auto max-h-[600px]">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
-                      <tr>
-                        <th className="py-3 px-4 font-semibold w-12 text-center">STT</th>
-                        <th className="py-3 px-4 font-semibold">MSSV</th>
-                        <th className="py-3 px-4 font-semibold">Họ và Tên</th>
-                        <th className="py-3 px-4 font-semibold">Check-in</th>
-                        <th className="py-3 px-4 font-semibold">Check-out</th>
-                        <th className="py-3 px-4 font-semibold text-center">Trạng Thái</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/40">
-                      {filteredRecords.map((r, index) => {
-                        const hasCheckIn = !!r.checkInAt;
-                        const hasCheckOut = !!r.checkOutAt;
-                        const status = r.attendanceStatus;
+                <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
+                  {filteredRecords.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-12 text-slate-400">
+                      <Users className="w-10 h-10 text-slate-600 mb-2" />
+                      <p className="text-sm font-medium text-slate-300">Không tìm thấy sinh viên</p>
+                      <p className="text-xs text-slate-500 mt-1">Thử tìm kiếm với từ khóa khác.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-900/90 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 backdrop-blur-md">
+                        <tr>
+                          <th className="py-3 px-4 font-semibold w-12 text-center">STT</th>
+                          <th className="py-3 px-4 font-semibold">MSSV</th>
+                          <th className="py-3 px-4 font-semibold">Họ và Tên</th>
+                          <th className="py-3 px-4 font-semibold">Check-in</th>
+                          <th className="py-3 px-4 font-semibold">Check-out</th>
+                          <th className="py-3 px-4 font-semibold text-center">Trạng Thái</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/40">
+                        {filteredRecords.map((r, index) => {
+                          const hasCheckIn = !!r.checkInAt;
+                          const hasCheckOut = !!r.checkOutAt;
+                          const status = r.attendanceStatus;
 
-                        return (
-                          <tr
-                            key={r.studentId}
-                            className={`hover:bg-slate-800/40 transition-colors ${
-                              hasCheckIn ? 'bg-emerald-500/[0.03]' : ''
-                            }`}
-                          >
-                            <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{index + 1}</td>
-                            <td className="py-2.5 px-4 font-mono font-bold text-indigo-400">{r.studentCode}</td>
-                            <td className="py-2.5 px-4 font-medium text-white">{r.fullName}</td>
-                            <td className="py-2.5 px-4 font-mono text-[11px]">
-                              {hasCheckIn ? (
-                                <span className="text-emerald-400 font-semibold">{formatTime(r.checkInAt)}</span>
-                              ) : (
-                                <span className="text-slate-600">-</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-4 font-mono text-[11px]">
-                              {hasCheckOut ? (
-                                <span className="text-amber-400 font-semibold">{formatTime(r.checkOutAt)}</span>
-                              ) : (
-                                <span className="text-slate-600">-</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-4 text-center">
-                              {status === 'PRESENT' ? (
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                  Đủ 2 lượt
-                                </span>
-                              ) : status === 'PENDING_REVIEW' ? (
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
-                                  Chờ duyệt
-                                </span>
-                              ) : status === 'REJECTED' ? (
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
-                                  Bị từ chối
-                                </span>
-                              ) : hasCheckIn ? (
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                  Check-in
-                                </span>
-                              ) : hasCheckOut ? (
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                  Check-out
-                                </span>
-                              ) : (
-                                <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
-                                  Vắng
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                          return (
+                            <tr
+                              key={r.studentId}
+                              className={`hover:bg-slate-800/40 transition-colors ${
+                                hasCheckIn ? 'bg-emerald-500/[0.03]' : ''
+                              }`}
+                            >
+                              <td className="py-2.5 px-4 text-center text-slate-500 font-mono">{index + 1}</td>
+                              <td className="py-2.5 px-4 font-mono font-bold text-indigo-400">{r.studentCode}</td>
+                              <td className="py-2.5 px-4 font-medium text-white">{r.fullName}</td>
+                              <td className="py-2.5 px-4 font-mono text-[11px]">
+                                {hasCheckIn ? (
+                                  <span className="text-emerald-400 font-semibold">{formatTime(r.checkInAt)}</span>
+                                ) : (
+                                  <span className="text-slate-600">-</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-4 font-mono text-[11px]">
+                                {hasCheckOut ? (
+                                  <span className="text-amber-400 font-semibold">{formatTime(r.checkOutAt)}</span>
+                                ) : (
+                                  <span className="text-slate-600">-</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-4 text-center">
+                                {status === 'PRESENT' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    Đủ 2 lượt
+                                  </span>
+                                ) : status === 'PENDING_REVIEW' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse">
+                                    Chờ duyệt
+                                  </span>
+                                ) : status === 'REJECTED' ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                                    Bị từ chối
+                                  </span>
+                                ) : hasCheckIn ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    Check-in
+                                  </span>
+                                ) : hasCheckOut ? (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                    Check-out
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                                    Vắng
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )}
 
               {/* TAB 2: Review Queue Table */}
               {activeTab === 'review' && (
-                <div className="flex-1 overflow-x-auto overflow-y-auto max-h-[600px]">
+                <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
                   {filteredReviewAttempts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center p-12 text-slate-400">
                       <CheckCircle2 className="w-10 h-10 text-emerald-400 mb-2" />
@@ -1224,6 +1232,60 @@ export const SessionLivePage: React.FC = () => {
                       </tbody>
                     </table>
                   )}
+                </div>
+              )}
+
+              {/* CARD FOOTER: SUMMARY & STATS */}
+              {activeTab === 'roster' ? (
+                <div className="p-3.5 px-4 border-t border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 flex-shrink-0">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <span>Tổng số:</span>
+                    <span className="text-white font-bold">{records.length}</span>
+                    <span>sinh viên</span>
+                    {searchRoster && (
+                      <span className="text-indigo-400 text-[11px]">
+                        (khớp: {filteredRecords.length})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="inline-flex items-center gap-1.5 text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                      Đủ 2 lượt: {records.filter((r) => r.attendanceStatus === 'PRESENT').length}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-indigo-400">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
+                      1 lượt: {records.filter((r) => (r.checkInAt && !r.checkOutAt) || (!r.checkInAt && r.checkOutAt)).length}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-amber-400">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                      Chờ duyệt: {records.filter((r) => r.attendanceStatus === 'PENDING_REVIEW').length}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-red-400">
+                      <span className="w-2 h-2 rounded-full bg-red-400 inline-block" />
+                      Vắng: {records.filter((r) => !r.checkInAt && !r.checkOutAt && r.attendanceStatus !== 'PENDING_REVIEW').length}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3.5 px-4 border-t border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 flex-shrink-0">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <span>Tổng số yêu cầu GPS:</span>
+                    <span className="text-white font-bold">{reviewAttempts.length}</span>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="inline-flex items-center gap-1 text-amber-400 font-bold">
+                      Chờ duyệt: {reviewAttempts.filter((a) => a.reviewStatus === 'PENDING_REVIEW').length}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-emerald-400">
+                      Đã duyệt: {reviewAttempts.filter((a) => a.reviewStatus === 'APPROVED').length}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-red-400">
+                      Đã từ chối: {reviewAttempts.filter((a) => a.reviewStatus === 'REJECTED').length}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
