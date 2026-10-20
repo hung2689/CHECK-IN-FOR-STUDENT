@@ -88,6 +88,30 @@ export const SessionLivePage: React.FC = () => {
   }, [toastMessage]);
 
   const qrContainerRef = useRef<HTMLDivElement>(null);
+  const leftColRef = useRef<HTMLDivElement>(null);
+  const [leftColHeight, setLeftColHeight] = useState<number | null>(null);
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!leftColRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.height > 0) {
+          setLeftColHeight(Math.round(entry.contentRect.height));
+        }
+      }
+    });
+    observer.observe(leftColRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Fetch session, records, review attempts, and review stats
   const fetchSessionData = async (silent = false) => {
@@ -659,9 +683,9 @@ export const SessionLivePage: React.FC = () => {
         </div>
 
         {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* LEFT: QR Code Presenter & Geofence Settings */}
-          <div className="lg:col-span-5 space-y-6">
+          <div ref={leftColRef} className="lg:col-span-5 space-y-6">
             {/* QR Projection Card */}
             <div
               ref={qrContainerRef}
@@ -908,8 +932,15 @@ export const SessionLivePage: React.FC = () => {
           </div>
 
           {/* RIGHT: Tabs: Bảng Điểm Danh (Roster) & Hàng Đợi Duyệt (Review Queue) */}
-          <div className="lg:col-span-7 flex flex-col min-h-0">
-            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col flex-1 h-full min-h-[580px]">
+          <div
+            className="lg:col-span-7 flex flex-col min-h-0 w-full"
+            style={
+              isDesktop && leftColHeight
+                ? { height: `${leftColHeight}px` }
+                : undefined
+            }
+          >
+            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col h-full">
               {/* Tab Selector & Controls Header */}
               <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60">
                 <div className="flex items-center space-x-2">
