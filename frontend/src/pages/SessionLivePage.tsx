@@ -88,30 +88,6 @@ export const SessionLivePage: React.FC = () => {
   }, [toastMessage]);
 
   const qrContainerRef = useRef<HTMLDivElement>(null);
-  const leftColRef = useRef<HTMLDivElement>(null);
-  const [leftColHeight, setLeftColHeight] = useState<number | null>(null);
-  const [isDesktop, setIsDesktop] = useState(
-    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
-  );
-
-  useEffect(() => {
-    const handleResize = () => setIsDesktop(window.innerWidth >= 1024);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  useEffect(() => {
-    if (!leftColRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.contentRect.height > 0) {
-          setLeftColHeight(Math.round(entry.contentRect.height));
-        }
-      }
-    });
-    observer.observe(leftColRef.current);
-    return () => observer.disconnect();
-  }, []);
 
   // Fetch session, records, review attempts, and review stats
   const fetchSessionData = async (silent = false) => {
@@ -683,9 +659,9 @@ export const SessionLivePage: React.FC = () => {
         </div>
 
         {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
           {/* LEFT: QR Code Presenter & Geofence Settings */}
-          <div ref={leftColRef} className="lg:col-span-5 space-y-6">
+          <div className="lg:col-span-5 space-y-5">
             {/* QR Projection Card */}
             <div
               ref={qrContainerRef}
@@ -932,15 +908,8 @@ export const SessionLivePage: React.FC = () => {
           </div>
 
           {/* RIGHT: Tabs: Bảng Điểm Danh (Roster) & Hàng Đợi Duyệt (Review Queue) */}
-          <div
-            className="lg:col-span-7 flex flex-col min-h-0 w-full"
-            style={
-              isDesktop && leftColHeight
-                ? { height: `${leftColHeight}px` }
-                : undefined
-            }
-          >
-            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col h-full">
+          <div className="lg:col-span-7 flex flex-col min-h-0 w-full lg:sticky lg:top-20">
+            <div className="glass-panel rounded-3xl border border-slate-800 overflow-hidden flex flex-col w-full h-[580px] lg:h-[calc(100vh-6.5rem)] max-h-[780px] min-h-[480px] shadow-2xl">
               {/* Tab Selector & Controls Header */}
               <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60">
                 <div className="flex items-center space-x-2">
@@ -1037,14 +1006,14 @@ export const SessionLivePage: React.FC = () => {
                     </div>
                   ) : (
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-900/90 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 backdrop-blur-md">
+                      <thead className="bg-[#0f172a] sticky top-0 z-20 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 shadow-sm">
                         <tr>
-                          <th className="py-3 px-4 font-semibold w-12 text-center">STT</th>
-                          <th className="py-3 px-4 font-semibold">MSSV</th>
-                          <th className="py-3 px-4 font-semibold">Họ và Tên</th>
-                          <th className="py-3 px-4 font-semibold">Check-in</th>
-                          <th className="py-3 px-4 font-semibold">Check-out</th>
-                          <th className="py-3 px-4 font-semibold text-center">Trạng Thái</th>
+                          <th className="py-3 px-4 font-semibold w-12 text-center bg-[#0f172a]">STT</th>
+                          <th className="py-3 px-4 font-semibold bg-[#0f172a]">MSSV</th>
+                          <th className="py-3 px-4 font-semibold bg-[#0f172a]">Họ và Tên</th>
+                          <th className="py-3 px-4 font-semibold bg-[#0f172a]">Check-in</th>
+                          <th className="py-3 px-4 font-semibold bg-[#0f172a]">Check-out</th>
+                          <th className="py-3 px-4 font-semibold text-center bg-[#0f172a]">Trạng Thái</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40">
@@ -1124,14 +1093,14 @@ export const SessionLivePage: React.FC = () => {
                     </div>
                   ) : (
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800">
+                      <thead className="bg-[#0f172a] sticky top-0 z-20 text-slate-400 uppercase tracking-wider text-[11px] border-b border-slate-800 shadow-sm">
                         <tr>
-                          <th className="py-3 px-3 font-semibold">Sinh Viên</th>
-                          <th className="py-3 px-3 font-semibold">Giai đoạn</th>
-                          <th className="py-3 px-3 font-semibold">Khoảng Cách</th>
-                          <th className="py-3 px-3 font-semibold">Kết Quả GPS</th>
-                          <th className="py-3 px-3 font-semibold text-center">Trạng Thái</th>
-                          <th className="py-3 px-3 font-semibold text-center">Thao Tác</th>
+                          <th className="py-3 px-3 font-semibold bg-[#0f172a]">Sinh Viên</th>
+                          <th className="py-3 px-3 font-semibold bg-[#0f172a]">Giai đoạn</th>
+                          <th className="py-3 px-3 font-semibold bg-[#0f172a]">Khoảng Cách</th>
+                          <th className="py-3 px-3 font-semibold bg-[#0f172a]">Kết Quả GPS</th>
+                          <th className="py-3 px-3 font-semibold text-center bg-[#0f172a]">Trạng Thái</th>
+                          <th className="py-3 px-3 font-semibold text-center bg-[#0f172a]">Thao Tác</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/40">
@@ -1268,7 +1237,7 @@ export const SessionLivePage: React.FC = () => {
 
               {/* CARD FOOTER: SUMMARY & STATS */}
               {activeTab === 'roster' ? (
-                <div className="p-3.5 px-4 border-t border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 flex-shrink-0">
+                <div className="p-3 px-4 border-t border-slate-800 bg-[#0f172a] flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 flex-shrink-0 z-10">
                   <div className="flex items-center gap-1.5 font-medium">
                     <span>Tổng số:</span>
                     <span className="text-white font-bold">{records.length}</span>
@@ -1300,7 +1269,7 @@ export const SessionLivePage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="p-3.5 px-4 border-t border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 flex-shrink-0">
+                <div className="p-3 px-4 border-t border-slate-800 bg-[#0f172a] flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 flex-shrink-0 z-10">
                   <div className="flex items-center gap-1.5 font-medium">
                     <span>Tổng số yêu cầu GPS:</span>
                     <span className="text-white font-bold">{reviewAttempts.length}</span>
